@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-de04-8211-929c-aabfc31766d4/raw?se=2026-08-04T12:29:55Z&sp=r&sv=2026-02-06&sr=b&scid=bf860282-0c55-5625-b423-c42d47c8cc00&skoid=cb94e22a-e3df-4e6a-9e17-1696f40fa435&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T23:12:25Z&ske=2026-08-04T23:12:25Z&sks=b&skv=2026-02-06&sig=9Mh0EWlQwe/%2BFX8RrFhVBqgQNZzpxZhc2X4a0ZGjeA8%3D'
+      SOURCE_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-8828-8211-a074-baca83b09604/raw?se=2026-08-04T12:32:34Z&sp=r&sv=2026-02-06&sr=b&scid=13af664a-8402-59a5-913d-34ac96c08a38&skoid=cb94e22a-e3df-4e6a-9e17-1696f40fa435&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T23:05:55Z&ske=2026-08-04T23:05:55Z&sks=b&skv=2026-02-06&sig=z8yUdOmj7RBfQ%2B1ekmKr4sUMDCFx/hXEHfP8Nm6aY08%3D'
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +51,8 @@ jobs:
               raise SystemExit('Style patch target not found')
           s=s.replace(old,new)
           s=s.replace('clean_text(p.text).startswith("الجزء الأول")', 'clean_text(p.text) == "الجزء الأول"')
+          s=s.replace('if re.match(r"^الجزء\\s+(الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|[0-9٠-٩]+)", t):', 'if re.match(r"^الجزء\\s+(الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|[0-9٠-٩]+)\\s*$", t):')
+          s=s.replace('elif re.match(r"^الجزء\\s+", t):', 'elif re.match(r"^الجزء\\s+(الأول|الثاني|الثالث|الرابع|الخامس)\\s*$", t):')
           s=s.replace('full_title = title_indices[1] if len(title_indices) > 1 else first_title', 'full_title = title_indices[-1] if len(title_indices) > 1 else first_title')
           s=s.replace('pgmar.set(qn("w:gutter"), str(int(Cm(.7))))', 'pgmar.set(qn("w:gutter"), "397")')
           marker='''    for p in doc.paragraphs:\n        t = paragraph_text(p)\n        if t in ("فهرس المحتويات", "قائمة الجداول", "قائمة الأشكال"):\n            p.style = "TOC Heading"\n'''
