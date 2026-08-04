@@ -1,0 +1,55 @@
+name: Execute corrected governance book build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/book-correction-runner.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download validated Word sources directly
+        run: |
+          curl -L --fail --retry 4 -A 'Mozilla/5.0' 'https://iacademyap-my.sharepoint.com/personal/iaa_iacademyap_com/_layouts/15/download.aspx?share=IQApWOFoWfsNRKvoD39OXIVvAcrhiPUREBsNNeQkreV0rYw' -o source.docx
+          curl -L --fail --retry 4 -A 'Mozilla/5.0' 'https://iacademyap-my.sharepoint.com/personal/iaa_iacademyap_com/_layouts/15/download.aspx?share=IQDEkb4UNmijSLLPqYYFUM6ZAXlXCfYzbCeV5rsPGwJCV7g' -o companion.docx
+          python - <<'PY'
+          import zipfile
+          for p in ('source.docx','companion.docx'):
+              assert zipfile.is_zipfile(p), p
+              with zipfile.ZipFile(p) as z: assert 'word/document.xml' in z.namelist()
+              print(p,'validated')
+          PY
+
+      - name: Execute embedded correction steps
+        run: |
+          python -m pip install --quiet pyyaml
+          python - <<'PY'
+          import os, subprocess, yaml
+          spec=yaml.safe_load(open('.github/workflows/book-correction-v2.yml',encoding='utf-8'))
+          steps=spec['jobs']['build']['steps']
+          skip={'Download and validate source files','Upload completed package'}
+          for step in steps:
+              name=step.get('name','')
+              script=step.get('run')
+              if not script or name in skip: continue
+              print(f'\n===== {name} =====',flush=True)
+              subprocess.run(['bash','-euo','pipefail','-c',script],check=True,env=os.environ.copy())
+          PY
+
+      - name: Upload corrected package
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrected-governance-book-complete
+          path: |
+            final_package/**
+            الحوكمة_من_الصفر_الحزمة_المصححة_الكاملة.zip
+          retention-days: 2
+          if-no-files-found: error
