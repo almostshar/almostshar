@@ -1,0 +1,62 @@
+name: Government book production
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/build_government_book.py'
+      - '.github/workflows/government-book-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SOURCE_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBsdpdgHJuFT4febb4uHdW3AbMz42uGBXYU7ppS9flOXfQ?download=1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download manuscript
+        run: |
+          curl --fail --location --retry 4 --retry-delay 3 --user-agent 'Mozilla/5.0' "$SOURCE_URL" -o source.docx
+          test -s source.docx
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('source.docx')
+          assert p.read_bytes()[:2] == b'PK', 'Downloaded file is not a DOCX ZIP package'
+          print('source bytes',p.stat().st_size)
+          PY
+
+      - name: Install document and rendering dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-writer python3-uno poppler-utils fonts-noto-core fonts-noto-extra
+          sudo apt-get install -y -qq fonts-hosny-amiri || true
+          python -m pip install --quiet python-docx lxml pymupdf pillow arabic-reshaper python-bidi
+          fc-cache -f
+          fc-match 'Amiri'
+          fc-match 'Noto Kufi Arabic'
+
+      - name: Build, update, render and audit book
+        run: |
+          python scripts/build_government_book.py
+          test -s 'output/دوائر_الإنجاز_الحكومي_النسخة_النهائية.docx'
+          test -s 'output/دوائر_الإنجاز_الحكومي_النسخة_النهائية.pdf'
+          test -s 'دوائر_الإنجاز_الحكومي_الحزمة_النهائية.zip'
+          unzip -t 'دوائر_الإنجاز_الحكومي_الحزمة_النهائية.zip'
+
+      - name: Upload final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: government-achievement-book-final
+          path: |
+            دوائر_الإنجاز_الحكومي_الحزمة_النهائية.zip
+            output/دوائر_الإنجاز_الحكومي_النسخة_النهائية.docx
+            output/دوائر_الإنجاز_الحكومي_النسخة_النهائية.pdf
+            output/تقرير_التدقيق_النهائي.pdf
+            output/audit.json
+          retention-days: 2
+          if-no-files-found: error
