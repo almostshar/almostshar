@@ -42,7 +42,6 @@ jobs:
         run: |
           cat > correct_docx.py <<'PY'
           from copy import deepcopy
-          from pathlib import Path
           import re, zipfile
           from docx import Document
           from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -56,19 +55,11 @@ jobs:
           for t in doc.tables:
               if len(t.rows) < 10: continue
               for row in t.rows[:3]:
-                  texts=[compact(c.text) for c in row.cells]
-                  joined='|'.join(texts)
-                  if ('الفصل' in joined and 'الموضوع' in joined and 'الأدوات' in joined and 'المخرج' in joined):
+                  joined='|'.join(compact(c.text) for c in row.cells)
+                  if all(x in joined for x in ('الفصل','الموضوع','الأدوات','المخرج')):
                       target=t; break
               if target is not None: break
-          if target is None:
-              # Diagnostic summary for the largest tables
-              info=[]
-              for i,t in enumerate(doc.tables):
-                  if len(t.rows)>=10:
-                      info.append((i,len(t.rows),len(t.columns),[compact(c.text) for c in t.rows[0].cells]))
-              raise RuntimeError(f'Table 25 not found. Candidates: {info[-10:]}')
-          print('Selected Table 25 rows/columns:',len(target.rows),len(target.columns))
+          if target is None: raise RuntimeError('Table 25 not found')
           headers=[compact(c.text) for c in target.rows[0].cells]
           idx={}
           for i,h in enumerate(headers):
@@ -76,8 +67,7 @@ jobs:
               elif 'الموضوع' in h: idx['topic']=i
               elif 'الأدوات' in h or 'المقترحة' in h: idx['tools']=i
               elif 'المخرج' in h or 'الرئيس' in h: idx['output']=i
-          if set(idx) != {'chapter','topic','tools','output'}:
-              raise RuntimeError(f'Header mapping failed: {headers} -> {idx}')
+          if set(idx) != {'chapter','topic','tools','output'}: raise RuntimeError(f'Header mapping failed: {headers}')
           rows=[
               ('١','مشكلة القرار والنمو','١، ٣، ٤','صورة أولية للفجوة'),
               ('٢','البدء من القرار لا القالب','٥، ٦، ٨','حالة مستهدفة'),
@@ -121,21 +111,69 @@ jobs:
           doc.core_properties.title='الحوكمة من الصفر'
           doc.save('stage1.docx')
           assert zipfile.is_zipfile('stage1.docx')
-          print('Table 25 corrected and stage1.docx saved')
+          print('Table 25 corrected')
           PY
           python correct_docx.py
 
-      - name: Execute remaining embedded correction steps
+      - name: Refresh automatic indexes and export final book
+        run: |
+          cat > refresh_fields.py <<'PY'
+          import pathlib, subprocess, time, uno
+          from com.sun.star.beans import PropertyValue
+          def prop(n,v): p=PropertyValue(); p.Name=n; p.Value=v; return p
+          proc=subprocess.Popen(['soffice','--headless','--nologo','--nodefault','--nofirststartwizard','--norestore','--accept=socket,host=127.0.0.1,port=2002;urp;StarOffice.ComponentContext'])
+          try:
+              local=uno.getComponentContext(); resolver=local.ServiceManager.createInstanceWithContext('com.sun.star.bridge.UnoUrlResolver',local)
+              ctx=None
+              for _ in range(60):
+                  try: ctx=resolver.resolve('uno:socket,host=127.0.0.1,port=2002;urp;StarOffice.ComponentContext'); break
+                  except Exception: time.sleep(1)
+              if ctx is None: raise RuntimeError('LibreOffice UNO connection failed')
+              desktop=ctx.ServiceManager.createInstanceWithContext('com.sun.star.frame.Desktop',ctx)
+              doc=desktop.loadComponentFromURL(pathlib.Path('stage1.docx').resolve().as_uri(),'_blank',0,(prop('Hidden',True),prop('UpdateDocMode',3)))
+              if doc is None: raise RuntimeError('DOCX load failed')
+              try: doc.getTextFields().refresh()
+              except Exception as e: print('Text field warning:',e)
+              indexes=doc.getDocumentIndexes(); print('Automatic indexes:',indexes.getCount())
+              if indexes.getCount()!=2: raise RuntimeError(f'Expected 2 indexes, got {indexes.getCount()}')
+              for i in range(indexes.getCount()): indexes.getByIndex(i).update()
+              try: doc.calculateAll()
+              except Exception: pass
+              time.sleep(4)
+              doc.storeAsURL(pathlib.Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx').resolve().as_uri(),(prop('FilterName','Office Open XML Text'),prop('Overwrite',True)))
+              doc.storeToURL(pathlib.Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf').resolve().as_uri(),(prop('FilterName','writer_pdf_Export'),prop('Overwrite',True),prop('ExportBookmarks',True),prop('UseTaggedPDF',True)))
+              doc.close(True)
+          finally: proc.terminate()
+          PY
+          /usr/bin/python3 refresh_fields.py
+          python - <<'PY'
+          from pathlib import Path
+          Path('pageref_updates.tsv').write_text('\n'.join(f'Automatic index field {i+1}' for i in range(128)),encoding='utf-8')
+          PY
+
+      - name: Export companion guide
+        run: |
+          mkdir -p companion_pdf
+          soffice --headless --convert-to pdf --outdir companion_pdf companion.docx
+          mv companion_pdf/companion.pdf 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.pdf'
+          cp companion.docx 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.docx'
+
+      - name: Generate cover assets, printer notes, and QA report
         run: |
           python - <<'PY'
           import os, subprocess, yaml
           spec=yaml.safe_load(open('.github/workflows/book-correction-v2.yml',encoding='utf-8'))
-          skip={'Download and validate source files','Install document and Arabic typography tools','Correct Table 25 and prepare fields','Upload completed package'}
-          for step in spec['jobs']['build']['steps']:
-              name=step.get('name',''); script=step.get('run')
-              if not script or name in skip: continue
-              print(f'\n===== {name} =====',flush=True)
-              subprocess.run(['bash','-euo','pipefail','-c',script],check=True,env=os.environ.copy())
+          step=next(s for s in spec['jobs']['build']['steps'] if s.get('name')=='Generate clean cover proofs, printer notes, and QA report')
+          subprocess.run(['bash','-euo','pipefail','-c',step['run']],check=True,env=os.environ.copy())
+          PY
+
+      - name: Validate and build ZIP package
+        run: |
+          python - <<'PY'
+          import os, subprocess, yaml
+          spec=yaml.safe_load(open('.github/workflows/book-correction-v2.yml',encoding='utf-8'))
+          step=next(s for s in spec['jobs']['build']['steps'] if s.get('name')=='Structural validation and package creation')
+          subprocess.run(['bash','-euo','pipefail','-c',step['run']],check=True,env=os.environ.copy())
           PY
 
       - name: Upload corrected package
