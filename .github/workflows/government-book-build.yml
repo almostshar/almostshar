@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_URL: 'https://sdmntprwestus.oaiusercontent.com/files/00000000-8b10-8230-befe-75741d200e27/raw?se=2026-08-04T12:23:20Z&sp=r&sv=2026-02-06&sr=b&scid=c3037d52-383a-52d0-9b13-28d52af6621f&skoid=cb94e22a-e3df-4e6a-9e17-1696f40fa435&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T23:10:58Z&ske=2026-08-04T23:10:58Z&sks=b&skv=2026-02-06&sig=N4Kfku6mZskaVwXUXslRvN1T/PC54IYO5XQtlMG2qic%3D'
+      SOURCE_URL: 'https://sdmntpraustraliaeast.oaiusercontent.com/files/00000000-b33c-81fa-b598-694ff6879469/raw?se=2026-08-04T12:25:29Z&sp=r&sv=2026-02-06&sr=b&scid=3fa2fc69-6137-5491-87e2-ad69ca943044&skoid=cb94e22a-e3df-4e6a-9e17-1696f40fa435&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T23:01:00Z&ske=2026-08-04T23:01:00Z&sks=b&skv=2026-02-06&sig=tObhqiin/a0H75B0bXZ%2BBkaIPvyrHNZotcMB78wSpV0%3D'
     steps:
       - uses: actions/checkout@v4
 
@@ -45,6 +45,11 @@ jobs:
           from pathlib import Path
           p=Path('scripts/build_government_book.py')
           s=p.read_text(encoding='utf-8')
+          old='''    try:\n        style = styles[name]\n    except KeyError:\n        style = styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)\n'''
+          new='''    try:\n        style = styles[name]\n        if style.type != WD_STYLE_TYPE.PARAGRAPH:\n            style.element.getparent().remove(style.element)\n            style = styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)\n    except KeyError:\n        style = styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)\n'''
+          if old not in s:
+              raise SystemExit('Style patch target not found')
+          s=s.replace(old,new)
           s=s.replace('full_title = title_indices[1] if len(title_indices) > 1 else first_title', 'full_title = title_indices[-1] if len(title_indices) > 1 else first_title')
           s=s.replace('pgmar.set(qn("w:gutter"), str(int(Cm(.7))))', 'pgmar.set(qn("w:gutter"), "397")')
           marker='''    for p in doc.paragraphs:\n        t = paragraph_text(p)\n        if t in ("فهرس المحتويات", "قائمة الجداول", "قائمة الأشكال"):\n            p.style = "TOC Heading"\n'''
