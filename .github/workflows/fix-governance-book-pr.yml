@@ -1,0 +1,44 @@
+name: PR governance book correction
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run embedded correction workflow steps
+        env:
+          SOURCE_URL: 'https://sdmntpraustraliaeast.oaiusercontent.com/files/00000000-14d0-81fa-b513-0bd6a0b0c6e6/raw?se=2026-08-04T10:47:31Z&sp=r&sv=2026-02-06&sr=b&scid=ff1f82d9-717e-5b1c-93dd-6ffb5b47ac87&skoid=cb94e22a-e3df-4e6a-9e17-1696f40fa435&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T23:05:52Z&ske=2026-08-04T23:05:52Z&sks=b&skv=2026-02-06&sig=%2B1ATl0le1z9aC6EhZZs1vhOCA8RFlHdHJKcBoMydrVQ%3D'
+        run: |
+          python -m pip install --quiet pyyaml
+          python - <<'PY'
+          import os, subprocess, yaml
+          path='.github/workflows/fix-governance-book.yml'
+          data=yaml.safe_load(open(path,encoding='utf-8'))
+          steps=data['jobs']['correct']['steps']
+          env=os.environ.copy()
+          env.update(data['jobs']['correct'].get('env',{}))
+          for step in steps:
+              script=step.get('run')
+              if not script:
+                  continue
+              name=step.get('name','unnamed')
+              print(f'\n===== {name} =====',flush=True)
+              subprocess.run(['bash','-euo','pipefail','-c',script],check=True,env=env)
+          PY
+      - name: Upload corrected package
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrected-governance-book
+          path: |
+            package/*
+            الحوكمة_من_الصفر_حزمة_التصحيح_النهائية.zip
+          retention-days: 1
+          if-no-files-found: error
