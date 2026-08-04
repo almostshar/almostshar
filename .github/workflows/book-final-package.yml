@@ -1,0 +1,84 @@
+name: Package corrected governance book final
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/book-final-package.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Execute successful correction and QA steps
+        run: |
+          python -m pip install --quiet pyyaml
+          python - <<'PY'
+          import os, subprocess, yaml
+          spec=yaml.safe_load(open('.github/workflows/book-correction-runner.yml',encoding='utf-8'))
+          skip={'Validate and build ZIP package','Upload corrected package'}
+          for step in spec['jobs']['execute']['steps']:
+              name=step.get('name','')
+              script=step.get('run')
+              if not script or name in skip:
+                  continue
+              print(f'\n===== {name} =====',flush=True)
+              subprocess.run(['bash','-euo','pipefail','-c',script],check=True,env=os.environ.copy())
+          PY
+
+      - name: Final structural checks and ZIP
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import fitz, zipfile
+          main_docx=Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx')
+          main_pdf=Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf')
+          assert zipfile.is_zipfile(main_docx)
+          with zipfile.ZipFile(main_docx) as z:
+              assert 'word/document.xml' in z.namelist()
+              assert 'word/settings.xml' in z.namelist()
+          pdf=fitz.open(main_pdf)
+          assert len(pdf)==207, len(pdf)
+          for required in [
+              'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.docx',
+              'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.pdf',
+              'الغلاف_الأمامي_النظيف_300DPI.png',
+              'الغلاف_الخلفي_النظيف_300DPI.png',
+              'دليل_الكعب_المصحح_غير_مقاس.png',
+              'مواصفات_التسليم_والطباعة.docx',
+              'مواصفات_التسليم_والطباعة.pdf',
+              'تقرير_التدقيق_النهائي.txt',
+          ]:
+              p=Path(required); assert p.exists() and p.stat().st_size>100, required
+          assert len(list(Path('qa_contact_sheets').glob('*.jpg'))) >= 50
+          print('Final validation passed: 207 pages, complete assets, 50+ QA contact sheets.')
+          PY
+          mkdir -p final_package
+          cp 'الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx' final_package/
+          cp 'الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf' final_package/
+          cp 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.docx' final_package/
+          cp 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.pdf' final_package/
+          cp 'الغلاف_الأمامي_النظيف_300DPI.png' final_package/
+          cp 'الغلاف_الخلفي_النظيف_300DPI.png' final_package/
+          cp 'دليل_الكعب_المصحح_غير_مقاس.png' final_package/
+          cp 'مواصفات_التسليم_والطباعة.docx' final_package/
+          cp 'مواصفات_التسليم_والطباعة.pdf' final_package/
+          cp 'تقرير_التدقيق_النهائي.txt' final_package/
+          cp -r qa_contact_sheets final_package/
+          (cd final_package && zip -9 -r '../الحوكمة_من_الصفر_الحزمة_المصححة_الكاملة.zip' .)
+
+      - name: Upload final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrected-governance-book-complete
+          path: |
+            final_package/**
+            الحوكمة_من_الصفر_الحزمة_المصححة_الكاملة.zip
+          retention-days: 2
+          if-no-files-found: error
