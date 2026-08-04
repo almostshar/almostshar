@@ -28,17 +28,111 @@ jobs:
               print(p,'validated')
           PY
 
-      - name: Execute embedded correction steps
+      - name: Install dependencies from embedded build
         run: |
           python -m pip install --quiet pyyaml
           python - <<'PY'
           import os, subprocess, yaml
           spec=yaml.safe_load(open('.github/workflows/book-correction-v2.yml',encoding='utf-8'))
-          steps=spec['jobs']['build']['steps']
-          skip={'Download and validate source files','Upload completed package'}
-          for step in steps:
-              name=step.get('name','')
-              script=step.get('run')
+          step=next(s for s in spec['jobs']['build']['steps'] if s.get('name')=='Install document and Arabic typography tools')
+          subprocess.run(['bash','-euo','pipefail','-c',step['run']],check=True,env=os.environ.copy())
+          PY
+
+      - name: Correct Table 25 robustly
+        run: |
+          cat > correct_docx.py <<'PY'
+          from copy import deepcopy
+          from pathlib import Path
+          import re, zipfile
+          from docx import Document
+          from docx.enum.text import WD_ALIGN_PARAGRAPH
+          from docx.oxml import OxmlElement
+          from docx.oxml.ns import qn
+          from docx.shared import Pt
+
+          doc=Document('source.docx')
+          def compact(s): return re.sub(r'[\sـ\u200e\u200f]+','',s or '')
+          target=None
+          for t in doc.tables:
+              if len(t.rows) < 10: continue
+              for row in t.rows[:3]:
+                  texts=[compact(c.text) for c in row.cells]
+                  joined='|'.join(texts)
+                  if ('الفصل' in joined and 'الموضوع' in joined and 'الأدوات' in joined and 'المخرج' in joined):
+                      target=t; break
+              if target is not None: break
+          if target is None:
+              # Diagnostic summary for the largest tables
+              info=[]
+              for i,t in enumerate(doc.tables):
+                  if len(t.rows)>=10:
+                      info.append((i,len(t.rows),len(t.columns),[compact(c.text) for c in t.rows[0].cells]))
+              raise RuntimeError(f'Table 25 not found. Candidates: {info[-10:]}')
+          print('Selected Table 25 rows/columns:',len(target.rows),len(target.columns))
+          headers=[compact(c.text) for c in target.rows[0].cells]
+          idx={}
+          for i,h in enumerate(headers):
+              if 'الفصل' in h: idx['chapter']=i
+              elif 'الموضوع' in h: idx['topic']=i
+              elif 'الأدوات' in h or 'المقترحة' in h: idx['tools']=i
+              elif 'المخرج' in h or 'الرئيس' in h: idx['output']=i
+          if set(idx) != {'chapter','topic','tools','output'}:
+              raise RuntimeError(f'Header mapping failed: {headers} -> {idx}')
+          rows=[
+              ('١','مشكلة القرار والنمو','١، ٣، ٤','صورة أولية للفجوة'),
+              ('٢','البدء من القرار لا القالب','٥، ٦، ٨','حالة مستهدفة'),
+              ('٣','التشخيص والانطباق','١–٨','تقرير تشخيص'),
+              ('٤','هرم الوثائق','٩–١٢، ٢٧–٣٠، ٨١','هرم وثائق وسجل ضبط'),
+              ('٥','الملكية والقيادة','١٣–١٤','خريطة حقوق وموضوعات محفوظة'),
+              ('٦','المجلس واللجان','١٥–٢٣، ٧٧–٧٩، ٨٨','منظومة مجلس قابلة للتشغيل'),
+              ('٧','الصلاحيات','٢٤–٢٦، ٤٠، ٨٠','مصفوفة صلاحيات'),
+              ('٨','الثقافة والسلوك','٣١–٣٣، ٧٢–٧٣، ٨٢','منظومة سلوك وإفصاح'),
+              ('٩','المخاطر والضوابط','٣٤–٣٩، ٨٣','سجل مخاطر وضوابط'),
+              ('١٠','الضمان المستقل','٣٨–٣٩','خريطة ضمان وتحسين'),
+              ('١١','المال والعقود','٤٠–٤٣','ضوابط مالية وتعاقدية'),
+              ('١٢','البيانات والخصوصية والأمن والذكاء الاصطناعي','٤٤–٤٨','سجل أصول واستخدامات وضوابط'),
+              ('١٣','الأدلة ومكتب الحوكمة','٥٤–٦٢، ٨٤','مكتب وسلسلة إثبات'),
+              ('١٤','خطة المئة يوم','٤٩–٥٣، ٦٣–٦٦، ٨٥','خطة تنفيذ مئة يوم'),
+              ('١٥','النضج والتناسب','٦٧–٧٦، ٨٦–٨٧','تقييم وخطة تحسين'),
+          ]
+          sample=deepcopy(target.rows[1]._tr)
+          for tr in list(target._tbl.tr_lst)[1:]: target._tbl.remove(tr)
+          def set_cell(cell,value):
+              cell.text=value
+              for p in cell.paragraphs:
+                  p.alignment=WD_ALIGN_PARAGRAPH.CENTER
+                  p.paragraph_format.space_before=Pt(0); p.paragraph_format.space_after=Pt(0)
+                  ppr=p._p.get_or_add_pPr()
+                  if ppr.find(qn('w:bidi')) is None: ppr.append(OxmlElement('w:bidi'))
+                  for r in p.runs:
+                      r.font.name='Amiri'; r.font.size=Pt(11.5)
+                      rpr=r._r.get_or_add_rPr(); fonts=rpr.find(qn('w:rFonts'))
+                      if fonts is None: fonts=OxmlElement('w:rFonts'); rpr.insert(0,fonts)
+                      for a in ('ascii','hAnsi','eastAsia','cs'): fonts.set(qn('w:'+a),'Amiri')
+                      if rpr.find(qn('w:rtl')) is None: rpr.append(OxmlElement('w:rtl'))
+          for chapter,topic,tools,output in rows:
+              target._tbl.append(deepcopy(sample)); cells=target.rows[-1].cells
+              set_cell(cells[idx['chapter']],chapter); set_cell(cells[idx['topic']],topic)
+              set_cell(cells[idx['tools']],tools); set_cell(cells[idx['output']],output)
+          settings=doc.settings.element; update=settings.find(qn('w:updateFields'))
+          if update is None: update=OxmlElement('w:updateFields'); settings.append(update)
+          update.set(qn('w:val'),'true')
+          for fld in doc.element.xpath('.//w:fldChar[@w:fldCharType="begin"]'): fld.set(qn('w:dirty'),'true')
+          doc.core_properties.title='الحوكمة من الصفر'
+          doc.save('stage1.docx')
+          assert zipfile.is_zipfile('stage1.docx')
+          print('Table 25 corrected and stage1.docx saved')
+          PY
+          python correct_docx.py
+
+      - name: Execute remaining embedded correction steps
+        run: |
+          python - <<'PY'
+          import os, subprocess, yaml
+          spec=yaml.safe_load(open('.github/workflows/book-correction-v2.yml',encoding='utf-8'))
+          skip={'Download and validate source files','Install document and Arabic typography tools','Correct Table 25 and prepare fields','Upload completed package'}
+          for step in spec['jobs']['build']['steps']:
+              name=step.get('name',''); script=step.get('run')
               if not script or name in skip: continue
               print(f'\n===== {name} =====',flush=True)
               subprocess.run(['bash','-euo','pipefail','-c',script],check=True,env=os.environ.copy())
