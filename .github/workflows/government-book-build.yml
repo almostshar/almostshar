@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_URL: 'https://sdmntpraustraliaeast.oaiusercontent.com/files/00000000-4654-81fa-a26b-71584f8ce730/raw?se=2026-08-04T12:10:33Z&sp=r&sv=2026-02-06&sr=b&scid=fb132501-50df-5219-909c-0ab03ede11e0&skoid=cb94e22a-e3df-4e6a-9e17-1696f40fa435&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T23:08:05Z&ske=2026-08-04T23:08:05Z&sks=b&skv=2026-02-06&sig=nb2/42YWcBFP244hNWPw0G3YdgQUPCeZsV0bgfYHboI%3D'
+      SOURCE_URL: 'https://sdmntprwestus.oaiusercontent.com/files/00000000-8b10-8230-befe-75741d200e27/raw?se=2026-08-04T12:23:20Z&sp=r&sv=2026-02-06&sr=b&scid=c3037d52-383a-52d0-9b13-28d52af6621f&skoid=cb94e22a-e3df-4e6a-9e17-1696f40fa435&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T23:10:58Z&ske=2026-08-04T23:10:58Z&sks=b&skv=2026-02-06&sig=N4Kfku6mZskaVwXUXslRvN1T/PC54IYO5XQtlMG2qic%3D'
     steps:
       - uses: actions/checkout@v4
 
@@ -33,8 +33,7 @@ jobs:
       - name: Install document and rendering dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libreoffice-writer python3-uno poppler-utils fonts-noto-core fonts-noto-extra
-          sudo apt-get install -y -qq fonts-hosny-amiri || true
+          sudo apt-get install -y -qq libreoffice-writer python3-uno poppler-utils fonts-noto-core fonts-hosny-amiri
           python -m pip install --quiet python-docx lxml pymupdf pillow arabic-reshaper python-bidi
           fc-cache -f
           fc-match 'Amiri'
@@ -46,10 +45,16 @@ jobs:
           from pathlib import Path
           p=Path('scripts/build_government_book.py')
           s=p.read_text(encoding='utf-8')
+          s=s.replace('full_title = title_indices[1] if len(title_indices) > 1 else first_title', 'full_title = title_indices[-1] if len(title_indices) > 1 else first_title')
+          s=s.replace('pgmar.set(qn("w:gutter"), str(int(Cm(.7))))', 'pgmar.set(qn("w:gutter"), "397")')
+          marker='''    for p in doc.paragraphs:\n        t = paragraph_text(p)\n        if t in ("فهرس المحتويات", "قائمة الجداول", "قائمة الأشكال"):\n            p.style = "TOC Heading"\n'''
+          replacement='''    for p in doc.paragraphs:\n        t = paragraph_text(p)\n        if t in ("فهرس المحتويات", "قائمة الجداول", "قائمة الأشكال"):\n            p.style = "TOC Heading"\n        if p._p.xpath('.//w:drawing') or p._p.xpath('.//w:pict'):\n            p.alignment = WD_ALIGN_PARAGRAPH.CENTER\n'''
+          s=s.replace(marker,replacement)
           start=s.index('def make_readme(audit: dict):')
           end=s.index('\ndef package():', start)
-          replacement='''def make_readme(audit: dict):\n    text = (\n        "دوائر الإنجاز الحكومي — حزمة التسليم النهائية\\n\\n"\n        "تتضمن الحزمة:\\n"\n        "1. النسخة النهائية القابلة للتحرير بصيغة Word.\\n"\n        "2. نسخة PDF مطابقة للمراجعة.\\n"\n        "3. الغلاف الأمامي والخلفي بدقة 300 DPI.\\n"\n        "4. دليل كعب غير مقياس حتى وصول مواصفات المطبعة.\\n"\n        "5. مواصفات الطباعة والتجليد.\\n"\n        "6. تقرير التدقيق وملف audit.json.\\n"\n        "7. لوحات مراجعة مصغرة لجميع الصفحات.\\n\\n"\n        f"عدد صفحات النسخة النهائية: {audit['pdf_pages']}\\n"\n        "مهم: لا يزال ملف الغلاف الكامل CMYK/PDF-X وعرض الكعب النهائي مرتبطين بمواصفات الورق والتجليد وبيانات المؤلف والناشر وISBN.\\n"\n    )\n    README.write_text(text, encoding="utf-8")\n\n'''
-          p.write_text(s[:start]+replacement+s[end+1:],encoding='utf-8')
+          replacement_readme='''def make_readme(audit: dict):\n    text = (\n        "دوائر الإنجاز الحكومي — حزمة التسليم النهائية\\n\\n"\n        "تتضمن الحزمة:\\n"\n        "1. النسخة النهائية القابلة للتحرير بصيغة Word.\\n"\n        "2. نسخة PDF مطابقة للمراجعة.\\n"\n        "3. الغلاف الأمامي والخلفي بدقة 300 DPI.\\n"\n        "4. دليل كعب غير مقياس حتى وصول مواصفات المطبعة.\\n"\n        "5. مواصفات الطباعة والتجليد.\\n"\n        "6. تقرير التدقيق وملف audit.json.\\n"\n        "7. لوحات مراجعة مصغرة لجميع الصفحات.\\n\\n"\n        f"عدد صفحات النسخة النهائية: {audit['pdf_pages']}\\n"\n        "مهم: لا يزال ملف الغلاف الكامل CMYK/PDF-X وعرض الكعب النهائي مرتبطين بمواصفات الورق والتجليد وبيانات المؤلف والناشر وISBN.\\n"\n    )\n    README.write_text(text, encoding="utf-8")\n\n'''
+          s=s[:start]+replacement_readme+s[end+1:]
+          p.write_text(s,encoding='utf-8')
           PY
           python -m py_compile scripts/build_government_book.py
 
