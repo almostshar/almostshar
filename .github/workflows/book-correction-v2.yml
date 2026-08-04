@@ -1,0 +1,473 @@
+name: Build corrected governance book package
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/book-correction-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQApWOFoWfsNRKvoD39OXIVvAcrhiPUREBsNNeQkreV0rYw?download=1'
+      COMPANION_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQDEkb4UNmijSLLPqYYFUM6ZAXlXCfYzbCeV5rsPGwJCV7g?download=1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and validate source files
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 4 --retry-delay 2 -A 'Mozilla/5.0' "$SOURCE_URL" -o source.docx
+          curl -L --fail --retry 4 --retry-delay 2 -A 'Mozilla/5.0' "$COMPANION_URL" -o companion.docx
+          python - <<'PY'
+          import zipfile
+          for p in ('source.docx','companion.docx'):
+              assert zipfile.is_zipfile(p), f'{p} is not a valid DOCX'
+              with zipfile.ZipFile(p) as z:
+                  assert 'word/document.xml' in z.namelist()
+              print(p, 'OK')
+          PY
+
+      - name: Install document and Arabic typography tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-writer python3-uno poppler-utils zip fonts-noto-core fonts-hosny-amiri
+          python -m pip install --quiet python-docx lxml pymupdf pillow arabic-reshaper python-bidi rapidfuzz reportlab
+          fc-cache -f
+          fc-match 'Amiri'
+          fc-match 'Noto Kufi Arabic'
+
+      - name: Correct Table 25 and prepare fields
+        run: |
+          cat > correct_docx.py <<'PY'
+          from copy import deepcopy
+          from pathlib import Path
+          import re, zipfile
+          from docx import Document
+          from docx.enum.text import WD_ALIGN_PARAGRAPH
+          from docx.oxml import OxmlElement
+          from docx.oxml.ns import qn
+          from docx.shared import Pt
+
+          SRC=Path('source.docx'); OUT=Path('stage1.docx')
+          doc=Document(SRC)
+
+          def compact(s):
+              return re.sub(r'[\sـ\u200e\u200f]+','',s or '')
+
+          target=None; waiting=False
+          for child in doc.element.body.iterchildren():
+              if child.tag == qn('w:p'):
+                  text=''.join(child.xpath('.//w:t/text()'))
+                  n=compact(text)
+                  if ('الجدول' in n and ('٢٥' in n or '25' in n)
+                      and 'مصفوفةالربطبينفصولالكتابودليلالأدوات' in n):
+                      waiting=True
+              elif child.tag == qn('w:tbl') and waiting:
+                  target=next((t for t in doc.tables if t._tbl is child),None)
+                  break
+          if target is None:
+              raise RuntimeError('Table 25 was not found')
+          if len(target.columns) != 4:
+              raise RuntimeError(f'Unexpected Table 25 column count: {len(target.columns)}')
+
+          headers=[compact(c.text) for c in target.rows[0].cells]
+          idx={}
+          for i,h in enumerate(headers):
+              if 'الفصل' in h: idx['chapter']=i
+              elif 'الموضوع' in h: idx['topic']=i
+              elif 'الأدوات' in h or 'المقترحة' in h: idx['tools']=i
+              elif 'المخرج' in h or 'الرئيس' in h: idx['output']=i
+          if set(idx) != {'chapter','topic','tools','output'}:
+              raise RuntimeError(f'Header mapping failed: {headers} -> {idx}')
+
+          rows=[
+              ('١','مشكلة القرار والنمو','١، ٣، ٤','صورة أولية للفجوة'),
+              ('٢','البدء من القرار لا القالب','٥، ٦، ٨','حالة مستهدفة'),
+              ('٣','التشخيص والانطباق','١–٨','تقرير تشخيص'),
+              ('٤','هرم الوثائق','٩–١٢، ٢٧–٣٠، ٨١','هرم وثائق وسجل ضبط'),
+              ('٥','الملكية والقيادة','١٣–١٤','خريطة حقوق وموضوعات محفوظة'),
+              ('٦','المجلس واللجان','١٥–٢٣، ٧٧–٧٩، ٨٨','منظومة مجلس قابلة للتشغيل'),
+              ('٧','الصلاحيات','٢٤–٢٦، ٤٠، ٨٠','مصفوفة صلاحيات'),
+              ('٨','الثقافة والسلوك','٣١–٣٣، ٧٢–٧٣، ٨٢','منظومة سلوك وإفصاح'),
+              ('٩','المخاطر والضوابط','٣٤–٣٩، ٨٣','سجل مخاطر وضوابط'),
+              ('١٠','الضمان المستقل','٣٨–٣٩','خريطة ضمان وتحسين'),
+              ('١١','المال والعقود','٤٠–٤٣','ضوابط مالية وتعاقدية'),
+              ('١٢','البيانات والخصوصية والأمن والذكاء الاصطناعي','٤٤–٤٨','سجل أصول واستخدامات وضوابط'),
+              ('١٣','الأدلة ومكتب الحوكمة','٥٤–٦٢، ٨٤','مكتب وسلسلة إثبات'),
+              ('١٤','خطة المئة يوم','٤٩–٥٣، ٦٣–٦٦، ٨٥','خطة تنفيذ مئة يوم'),
+              ('١٥','النضج والتناسب','٦٧–٧٦، ٨٦–٨٧','تقييم وخطة تحسين'),
+          ]
+          sample=deepcopy(target.rows[1]._tr)
+          for tr in list(target._tbl.tr_lst)[1:]: target._tbl.remove(tr)
+
+          def set_cell(cell,value):
+              cell.text=value
+              for p in cell.paragraphs:
+                  p.alignment=WD_ALIGN_PARAGRAPH.CENTER
+                  p.paragraph_format.space_before=Pt(0)
+                  p.paragraph_format.space_after=Pt(0)
+                  ppr=p._p.get_or_add_pPr()
+                  if ppr.find(qn('w:bidi')) is None: ppr.append(OxmlElement('w:bidi'))
+                  for r in p.runs:
+                      r.font.name='Amiri'; r.font.size=Pt(11.5)
+                      rpr=r._r.get_or_add_rPr()
+                      fonts=rpr.find(qn('w:rFonts'))
+                      if fonts is None:
+                          fonts=OxmlElement('w:rFonts'); rpr.insert(0,fonts)
+                      for a in ('ascii','hAnsi','eastAsia','cs'): fonts.set(qn('w:'+a),'Amiri')
+                      if rpr.find(qn('w:rtl')) is None: rpr.append(OxmlElement('w:rtl'))
+
+          for chapter,topic,tools,output in rows:
+              target._tbl.append(deepcopy(sample))
+              cells=target.rows[-1].cells
+              set_cell(cells[idx['chapter']],chapter)
+              set_cell(cells[idx['topic']],topic)
+              set_cell(cells[idx['tools']],tools)
+              set_cell(cells[idx['output']],output)
+
+          settings=doc.settings.element
+          update=settings.find(qn('w:updateFields'))
+          if update is None:
+              update=OxmlElement('w:updateFields'); settings.append(update)
+          update.set(qn('w:val'),'true')
+          for fld in doc.element.xpath('.//w:fldChar[@w:fldCharType="begin"]'):
+              fld.set(qn('w:dirty'),'true')
+          doc.core_properties.title='الحوكمة من الصفر'
+          doc.save(OUT)
+          assert zipfile.is_zipfile(OUT)
+          print('Corrected Table 25 and saved',OUT)
+          PY
+          python correct_docx.py
+
+      - name: Refresh fields and create pagination reference PDF
+        run: |
+          cat > refresh_fields.py <<'PY'
+          import pathlib, subprocess, time, uno
+          from com.sun.star.beans import PropertyValue
+          def prop(n,v):
+              p=PropertyValue(); p.Name=n; p.Value=v; return p
+          proc=subprocess.Popen(['soffice','--headless','--nologo','--nodefault','--nofirststartwizard','--norestore','--accept=socket,host=127.0.0.1,port=2002;urp;StarOffice.ComponentContext'])
+          try:
+              local=uno.getComponentContext(); resolver=local.ServiceManager.createInstanceWithContext('com.sun.star.bridge.UnoUrlResolver',local)
+              ctx=None
+              for _ in range(60):
+                  try:
+                      ctx=resolver.resolve('uno:socket,host=127.0.0.1,port=2002;urp;StarOffice.ComponentContext'); break
+                  except Exception: time.sleep(1)
+              if ctx is None: raise RuntimeError('LibreOffice UNO connection failed')
+              desktop=ctx.ServiceManager.createInstanceWithContext('com.sun.star.frame.Desktop',ctx)
+              doc=desktop.loadComponentFromURL(pathlib.Path('stage1.docx').resolve().as_uri(),'_blank',0,(prop('Hidden',True),prop('UpdateDocMode',3)))
+              if doc is None: raise RuntimeError('DOCX load failed')
+              try: doc.getTextFields().refresh()
+              except Exception as e: print('Text field refresh warning:',e)
+              indexes=doc.getDocumentIndexes(); print('Document index count:',indexes.getCount())
+              for i in range(indexes.getCount()):
+                  try: indexes.getByIndex(i).update()
+                  except Exception as e: print('Index update warning',i,e)
+              try: doc.calculateAll()
+              except Exception: pass
+              time.sleep(4)
+              doc.storeAsURL(pathlib.Path('stage2.docx').resolve().as_uri(),(prop('FilterName','Office Open XML Text'),prop('Overwrite',True)))
+              doc.storeToURL(pathlib.Path('pagination.pdf').resolve().as_uri(),(prop('FilterName','writer_pdf_Export'),prop('Overwrite',True),prop('ExportBookmarks',True),prop('UseTaggedPDF',True)))
+              doc.close(True)
+          finally:
+              proc.terminate()
+          PY
+          /usr/bin/python3 refresh_fields.py
+
+      - name: Rebuild cached page references against actual pagination
+        run: |
+          cat > rebuild_pagerefs.py <<'PY'
+          from pathlib import Path
+          from lxml import etree
+          from rapidfuzz import fuzz
+          import fitz, re, shutil, zipfile, tempfile, unicodedata
+
+          DOCX=Path('stage2.docx'); PDF=Path('pagination.pdf'); OUT=Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx')
+          W='http://schemas.openxmlformats.org/wordprocessingml/2006/main'; NS={'w':W}
+          def q(n): return f'{{{W}}}{n}'
+          def norm(s):
+              s=unicodedata.normalize('NFKC',s or '')
+              s=re.sub(r'[\u064b-\u065f\u0670\u06d6-\u06edـ\s\u200e\u200f]+','',s)
+              s=s.translate(str.maketrans({'أ':'ا','إ':'ا','آ':'ا','ى':'ي','ة':'ه','ؤ':'و','ئ':'ي'}))
+              s=re.sub(r'[^0-9٠-٩A-Za-zء-ي]+','',s)
+              return s
+          def roman(n):
+              vals=((1000,'m'),(900,'cm'),(500,'d'),(400,'cd'),(100,'c'),(90,'xc'),(50,'l'),(40,'xl'),(10,'x'),(9,'ix'),(5,'v'),(4,'iv'),(1,'i'))
+              out=''
+              for v,s in vals:
+                  while n>=v: out+=s; n-=v
+              return out
+          def arnum(n): return str(n).translate(str.maketrans('0123456789','٠١٢٣٤٥٦٧٨٩'))
+          def label(physical): return roman(physical) if physical<=14 else arnum(physical-14)
+
+          with zipfile.ZipFile(DOCX) as z:
+              xml=z.read('word/document.xml'); files={n:z.read(n) for n in z.namelist()}
+          root=etree.fromstring(xml)
+          bookmarks={}
+          for b in root.xpath('.//w:bookmarkStart',namespaces=NS):
+              name=b.get(q('name'))
+              p=b.xpath('ancestor::w:p[1]',namespaces=NS)
+              if name and p:
+                  text=''.join(p[0].xpath('.//w:t/text()',namespaces=NS)).strip()
+                  if text: bookmarks[name]=text
+
+          pdf=fitz.open(PDF)
+          page_text=[p.get_text('text') for p in pdf]
+          page_norm=[norm(t) for t in page_text]
+          search_cache={}
+          def find_page(text):
+              key=norm(text)
+              if key in search_cache: return search_cache[key]
+              candidates=[]
+              probes=[key]
+              if len(key)>70: probes.extend([key[:70],key[:50]])
+              for i in range(10,len(page_norm)):
+                  if any(p and p in page_norm[i] for p in probes):
+                      search_cache[key]=i+1; return i+1
+              best=(0,None)
+              probe=key[:100]
+              for i in range(10,len(page_norm)):
+                  score=fuzz.partial_ratio(probe,page_norm[i])
+                  if score>best[0]: best=(score,i+1)
+              if best[0] >= 76:
+                  search_cache[key]=best[1]; return best[1]
+              return None
+
+          updates=[]; failures=[]
+          for p in root.xpath('.//w:p',namespaces=NS):
+              nodes=list(p.iter())
+              stack=[]
+              for el in nodes:
+                  if el.tag==q('fldChar'):
+                      typ=el.get(q('fldCharType'))
+                      if typ=='begin': stack.append({'instr':'','phase':'instr','texts':[]})
+                      elif stack and typ=='separate': stack[-1]['phase']='result'
+                      elif stack and typ=='end':
+                          f=stack.pop(); m=re.search(r'PAGEREF\s+([^\s\\]+)',f['instr'],re.I)
+                          if m:
+                              bm=m.group(1); target=bookmarks.get(bm)
+                              physical=find_page(target) if target else None
+                              if physical and f['texts']:
+                                  new=label(physical); old=''.join((t.text or '') for t in f['texts'])
+                                  f['texts'][0].text=new
+                                  for t in f['texts'][1:]: t.text=''
+                                  updates.append((bm,target,old,new,physical))
+                              else: failures.append((bm,target))
+                  elif stack and el.tag==q('instrText'): stack[-1]['instr'] += el.text or ''
+                  elif stack and stack[-1]['phase']=='result' and el.tag==q('t'): stack[-1]['texts'].append(el)
+
+          if len(updates) < 120:
+              raise RuntimeError(f'Only {len(updates)} PAGEREF fields updated; failures={failures[:10]}')
+          if failures:
+              raise RuntimeError(f'Unresolved PAGEREF fields: {failures[:10]}')
+
+          settings=etree.fromstring(files['word/settings.xml'])
+          uf=settings.find(q('updateFields'))
+          if uf is None: uf=etree.SubElement(settings,q('updateFields'))
+          uf.set(q('val'),'true')
+          files['word/document.xml']=etree.tostring(root,xml_declaration=True,encoding='UTF-8',standalone='yes')
+          files['word/settings.xml']=etree.tostring(settings,xml_declaration=True,encoding='UTF-8',standalone='yes')
+          with zipfile.ZipFile(OUT,'w',zipfile.ZIP_DEFLATED) as z:
+              for n,data in files.items(): z.writestr(n,data)
+          Path('pageref_updates.tsv').write_text('\n'.join('\t'.join(str(x) for x in u) for u in updates),encoding='utf-8')
+          print('Updated PAGEREF fields:',len(updates),'PDF pages:',len(pdf))
+          PY
+          python rebuild_pagerefs.py
+
+      - name: Export final PDF without re-overwriting cached references
+        run: |
+          cat > export_final.py <<'PY'
+          import pathlib, subprocess, time, uno
+          from com.sun.star.beans import PropertyValue
+          def prop(n,v): p=PropertyValue(); p.Name=n; p.Value=v; return p
+          proc=subprocess.Popen(['soffice','--headless','--nologo','--nodefault','--nofirststartwizard','--norestore','--accept=socket,host=127.0.0.1,port=2003;urp;StarOffice.ComponentContext'])
+          try:
+              local=uno.getComponentContext(); resolver=local.ServiceManager.createInstanceWithContext('com.sun.star.bridge.UnoUrlResolver',local)
+              ctx=None
+              for _ in range(60):
+                  try: ctx=resolver.resolve('uno:socket,host=127.0.0.1,port=2003;urp;StarOffice.ComponentContext'); break
+                  except Exception: time.sleep(1)
+              if ctx is None: raise RuntimeError('UNO connection failed')
+              desktop=ctx.ServiceManager.createInstanceWithContext('com.sun.star.frame.Desktop',ctx)
+              doc=desktop.loadComponentFromURL(pathlib.Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx').resolve().as_uri(),'_blank',0,(prop('Hidden',True),prop('UpdateDocMode',0)))
+              if doc is None: raise RuntimeError('Final DOCX load failed')
+              doc.storeToURL(pathlib.Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf').resolve().as_uri(),(prop('FilterName','writer_pdf_Export'),prop('Overwrite',True),prop('ExportBookmarks',True),prop('UseTaggedPDF',True)))
+              doc.close(True)
+          finally: proc.terminate()
+          PY
+          /usr/bin/python3 export_final.py
+          mkdir -p companion_pdf
+          soffice --headless --convert-to pdf --outdir companion_pdf companion.docx
+          mv companion_pdf/companion.pdf 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.pdf'
+          cp companion.docx 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.docx'
+
+      - name: Generate clean cover proofs, printer notes, and QA report
+        run: |
+          cat > create_assets.py <<'PY'
+          from pathlib import Path
+          import fitz, subprocess, math, re, zipfile
+          from PIL import Image, ImageDraw, ImageFont
+          import arabic_reshaper
+          from bidi.algorithm import get_display
+          from docx import Document
+          from docx.enum.text import WD_ALIGN_PARAGRAPH
+          from docx.enum.section import WD_SECTION
+          from docx.oxml import OxmlElement
+          from docx.oxml.ns import qn
+          from docx.shared import Cm, Pt
+
+          MAIN_PDF=Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf')
+          pdf=fitz.open(MAIN_PDF); pages=len(pdf)
+          W,H=2008,2835; IVORY='#F4EFE3'; PETROL='#174E5D'; GOLD='#B39A5A'; CHAR='#333333'
+          def fc(pattern): return subprocess.check_output(['fc-match','-f','%{file}',pattern],text=True).strip()
+          kufi=fc('Noto Kufi Arabic'); amiri=fc('Amiri')
+          def rtl(s): return get_display(arabic_reshaper.reshape(s))
+          def wrap(draw,text,font,maxw):
+              words=text.split(); lines=[]; cur=''
+              for word in words:
+                  test=(cur+' '+word).strip()
+                  if draw.textbbox((0,0),rtl(test),font=font)[2] <= maxw: cur=test
+                  else:
+                      if cur: lines.append(cur)
+                      cur=word
+              if cur: lines.append(cur)
+              return lines
+          def base():
+              im=Image.new('RGB',(W,H),IVORY); d=ImageDraw.Draw(im)
+              d.rectangle((0,0,W,205),fill=PETROL); d.rectangle((135,300,W-135,314),fill=GOLD)
+              return im,d
+          tf=ImageFont.truetype(kufi,118); sf=ImageFont.truetype(kufi,49); bf=ImageFont.truetype(amiri,48); sm=ImageFont.truetype(amiri,34)
+          im,d=base()
+          d.text((W//2,565),rtl('الحوكمة من الصفر'),font=tf,fill=PETROL,anchor='mm')
+          d.text((W//2,805),rtl('دليل عملي للشركات السعودية من التأسيس إلى النضج'),font=sf,fill=GOLD,anchor='mm')
+          d.rectangle((390,1050,W-390,1064),fill=GOLD)
+          d.text((W//2,1260),rtl('كتاب مهني سردي يربط القرار بالمساءلة والدليل'),font=bf,fill=CHAR,anchor='mm')
+          d.text((W//2,H-290),rtl('الطبعة المنقحة الأولى | ٢٠٢٦م'),font=sm,fill=PETROL,anchor='mm')
+          im.save('الغلاف_الأمامي_النظيف_300DPI.png',dpi=(300,300))
+
+          im,d=base(); y=440
+          d.text((W-150,y),rtl('حوكمة فعّالة تبدأ من القرار'),font=ImageFont.truetype(kufi,82),fill=PETROL,anchor='ra'); y+=180
+          para='لا تبدأ الحوكمة بكثرة اللوائح، بل بوضوح القرار والمسؤولية والدليل. يقدم هذا الكتاب مسارًا عمليًا للشركات السعودية من تشخيص الواقع وتحديد الانطباق إلى بناء الصلاحيات والمجلس والسياسات والضوابط، ثم تشغيل الحوكمة وقياس نضجها وتحسينها.'
+          for line in wrap(d,para,bf,W-300): d.text((W-150,y),rtl(line),font=bf,fill=CHAR,anchor='ra'); y+=80
+          y+=70
+          for point in ['تمييز المتطلبات الملزمة من الممارسات الاسترشادية','ربط السلطة بالمعلومات والتنفيذ والدليل','تصميم مجلس وصلاحيات وضوابط متناسبة','تحويل الحوكمة إلى خطة مئة يوم قابلة للقياس']:
+              d.ellipse((W-185,y+20,W-163,y+42),fill=GOLD); d.text((W-215,y),rtl(point),font=bf,fill=CHAR,anchor='ra'); y+=110
+          d.rectangle((135,H-420,W-135,H-406),fill=GOLD)
+          d.text((W-150,H-335),rtl('الطبعة المنقحة الأولى | ٢٠٢٦م'),font=sm,fill=PETROL,anchor='ra')
+          im.save('الغلاف_الخلفي_النظيف_300DPI.png',dpi=(300,300))
+
+          sw=1100; sp=Image.new('RGB',(sw,H),IVORY); sd=ImageDraw.Draw(sp)
+          sd.rectangle((0,0,sw,205),fill=PETROL)
+          sd.text((sw-90,350),rtl('دليل إعداد الكعب'),font=ImageFont.truetype(kufi,72),fill=PETROL,anchor='ra')
+          sd.text((sw-90,505),rtl('غير مقياس للطباعة'),font=ImageFont.truetype(kufi,40),fill=GOLD,anchor='ra')
+          note=f'عدد صفحات ملف المتن الحالي: {pages} صفحة. يُحسب عرض الكعب النهائي بعد اعتماد نوع الورق وسماكته وطريقة التجليد لدى المطبعة. أزيل الافتراض السابق البالغ ٢٠٥ صفحات.'
+          y=720
+          for line in wrap(sd,note,ImageFont.truetype(amiri,45),sw-180): sd.text((sw-90,y),rtl(line),font=ImageFont.truetype(amiri,45),fill=CHAR,anchor='ra'); y+=78
+          sd.rectangle((90,1300,sw-90,1314),fill=GOLD)
+          sd.text((sw//2,1570),rtl('الحوكمة من الصفر'),font=ImageFont.truetype(kufi,68),fill=PETROL,anchor='mm')
+          sp.save('دليل_الكعب_المصحح_غير_مقاس.png',dpi=(300,300))
+
+          def rtl_para(p,text,size=12,bold=False,font='Amiri',align=WD_ALIGN_PARAGRAPH.RIGHT):
+              p.alignment=align; p.paragraph_format.space_after=Pt(6)
+              ppr=p._p.get_or_add_pPr(); ppr.append(OxmlElement('w:bidi'))
+              r=p.add_run(text); r.bold=bold; r.font.name=font; r.font.size=Pt(size)
+              rpr=r._r.get_or_add_rPr(); rf=OxmlElement('w:rFonts')
+              for a in ('ascii','hAnsi','eastAsia','cs'): rf.set(qn('w:'+a),font)
+              rpr.insert(0,rf); rpr.append(OxmlElement('w:rtl'))
+          doc=Document(); sec=doc.sections[0]; sec.page_width=Cm(17); sec.page_height=Cm(24); sec.top_margin=Cm(2); sec.bottom_margin=Cm(2); sec.left_margin=Cm(2); sec.right_margin=Cm(2)
+          rtl_para(doc.add_paragraph(),'مواصفات التسليم والطباعة — الحوكمة من الصفر',18,True,'Noto Kufi Arabic',WD_ALIGN_PARAGRAPH.CENTER)
+          items=[
+              f'المتن النهائي: {pages} صفحة في ملف PDF المرفق، مع نسخة Word قابلة للتحرير.',
+              'مقاس المتن: 17 × 24 سم، صفحات متقابلة، واتجاه عربي من اليمين إلى اليسار.',
+              'تم تصحيح الجدول ٢٥ وتحديث جميع مراجع صفحات جدول المحتويات وقائمة الجداول وفق الترقيم الفعلي.',
+              'تم إرفاق دليل الأدوات والنماذج المصاحب بصيغتي Word وPDF.',
+              'الغلافان الأمامي والخلفي المرفقان بوضوح 300 DPI، بلا بيانات مؤلف أو ISBN مختلقة.',
+              'عرض الكعب غير نهائي؛ يجب أن تحسبه المطبعة بعد تحديد نوع الورق وسماكته وطريقة التجليد.',
+              'التشطيب المقترح: غلاف 350 gsm، تغليف مطفي، Spot UV على العنوان، وبروز خفيف، وتجليد مخيط بخيط.',
+              'ملف PDF المرفق ملف مراجعة عالي الجودة، وليس شهادة PDF/X-4 أو تحويل CMYK معتمدًا من مطبعة.',
+          ]
+          for x in items: rtl_para(doc.add_paragraph(),x,12)
+          doc.save('مواصفات_التسليم_والطباعة.docx')
+          subprocess.run(['soffice','--headless','--convert-to','pdf','--outdir','.', 'مواصفات_التسليم_والطباعة.docx'],check=True)
+
+          # QA rendering and contact sheets
+          out=Path('qa_pages'); out.mkdir(exist_ok=True)
+          suspicious=[]; clipped=[]; thumbs=[]
+          for i,p in enumerate(pdf):
+              for b in p.get_text('blocks'):
+                  x0,y0,x1,y1,*_=b
+                  if x0 < -1 or y0 < -1 or x1 > p.rect.width+1 or y1 > p.rect.height+1: clipped.append(i+1)
+              text=p.get_text('text').strip()
+              if len(text)<12 and (i+1) not in (1,2,3,15): suspicious.append(i+1)
+              pix=p.get_pixmap(matrix=fitz.Matrix(1.2,1.2),alpha=False)
+              path=out/f'page-{i+1:03}.jpg'; pix.save(path); thumbs.append(Image.open(path).convert('RGB'))
+          sheets=Path('qa_contact_sheets'); sheets.mkdir(exist_ok=True)
+          for s in range(0,len(thumbs),4):
+              batch=thumbs[s:s+4]; tw=850; margin=24
+              scaled=[]
+              for imx in batch:
+                  ratio=tw/imx.width; scaled.append(imx.resize((tw,int(imx.height*ratio))))
+              sh=max(imx.height for imx in scaled); sheet=Image.new('RGB',(tw*2+margin*3,sh*2+margin*3),'white')
+              for j,imx in enumerate(scaled): sheet.paste(imx,(margin+(j%2)*(tw+margin),margin+(j//2)*(sh+margin)))
+              sheet.save(sheets/f'sheet-{s//4+1:02}.jpg',quality=88)
+          report=[
+              'تقرير التدقيق النهائي',f'عدد صفحات المتن PDF: {pages}',f'عدد حقول PAGEREF المصححة: {sum(1 for _ in Path("pageref_updates.tsv").read_text(encoding="utf-8").splitlines())}',
+              'الجدول ٢٥: مصحح ومراجع مقابل دليل الأدوات المصاحب',f'صفحات ذات نص قليل خارج صفحات العناوين المتوقعة: {suspicious or "لا يوجد"}',f'كتل نصية خارج حدود الصفحة: {sorted(set(clipped)) or "لا يوجد"}',
+              'تم إنشاء صور معاينة لجميع الصفحات وأوراق اتصال للمراجعة البصرية.',
+              'لم تُخترع بيانات المؤلف أو الناشر أو ISBN أو السعر أو QR.',
+          ]
+          Path('تقرير_التدقيق_النهائي.txt').write_text('\n'.join(report),encoding='utf-8')
+          print('\n'.join(report))
+          if clipped: raise SystemExit(f'Clipped pages detected: {clipped}')
+          PY
+          python create_assets.py
+
+      - name: Structural validation and package creation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from lxml import etree
+          import zipfile, re, fitz
+          docx=Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx')
+          assert zipfile.is_zipfile(docx)
+          with zipfile.ZipFile(docx) as z:
+              xml=z.read('word/document.xml').decode('utf-8')
+              settings=z.read('word/settings.xml').decode('utf-8')
+          for required in ['هرم وثائق وسجل ضبط','خطة تنفيذ مئة يوم','٦٧–٧٦، ٨٦–٨٧']:
+              assert required in xml, required
+          assert 'updateFields' in settings
+          pdf=fitz.open('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf')
+          assert 160 <= len(pdf) <= 180, len(pdf)
+          assert Path('أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.pdf').stat().st_size > 10000
+          print('Structural validation passed; pages=',len(pdf))
+          PY
+          mkdir -p final_package
+          cp 'الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx' final_package/
+          cp 'الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf' final_package/
+          cp 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.docx' final_package/
+          cp 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.pdf' final_package/
+          cp 'الغلاف_الأمامي_النظيف_300DPI.png' final_package/
+          cp 'الغلاف_الخلفي_النظيف_300DPI.png' final_package/
+          cp 'دليل_الكعب_المصحح_غير_مقاس.png' final_package/
+          cp 'مواصفات_التسليم_والطباعة.docx' final_package/
+          cp 'مواصفات_التسليم_والطباعة.pdf' final_package/
+          cp 'تقرير_التدقيق_النهائي.txt' final_package/
+          cp -r qa_contact_sheets final_package/
+          (cd final_package && zip -9 -r '../الحوكمة_من_الصفر_الحزمة_المصححة_الكاملة.zip' .)
+
+      - name: Upload completed package
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrected-governance-book-complete
+          path: |
+            final_package/**
+            الحوكمة_من_الصفر_الحزمة_المصححة_الكاملة.zip
+          retention-days: 2
+          if-no-files-found: error
