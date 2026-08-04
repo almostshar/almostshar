@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBsdpdgHJuFT4febb4uHdW3AbMz42uGBXYU7ppS9flOXfQ?download=1'
+      SOURCE_URL: 'https://sdmntpraustraliaeast.oaiusercontent.com/files/00000000-de98-81fa-9b44-b6cf16ed28e7/raw?se=2026-08-04T12:08:23Z&sp=r&sv=2026-02-06&sr=b&scid=7e8e5532-c16e-59f5-af05-6f42d9ff29fe&skoid=cb94e22a-e3df-4e6a-9e17-1696f40fa435&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-03T23:23:25Z&ske=2026-08-04T23:23:25Z&sks=b&skv=2026-02-06&sig=UESWiEv5GWhA5hoEP%2B1w7Q70BidHuMFFW21h2LMRh1E%3D'
     steps:
       - uses: actions/checkout@v4
 
