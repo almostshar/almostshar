@@ -48,7 +48,6 @@ jobs:
           from docx.oxml import OxmlElement
           from docx.oxml.ns import qn
           from docx.shared import Pt
-
           doc=Document('source.docx')
           def compact(s): return re.sub(r'[\sـ\u200e\u200f]+','',s or '')
           target=None
@@ -111,7 +110,6 @@ jobs:
           doc.core_properties.title='الحوكمة من الصفر'
           doc.save('stage1.docx')
           assert zipfile.is_zipfile('stage1.docx')
-          print('Table 25 corrected')
           PY
           python correct_docx.py
 
@@ -170,11 +168,36 @@ jobs:
       - name: Validate and build ZIP package
         run: |
           python - <<'PY'
-          import os, subprocess, yaml
-          spec=yaml.safe_load(open('.github/workflows/book-correction-v2.yml',encoding='utf-8'))
-          step=next(s for s in spec['jobs']['build']['steps'] if s.get('name')=='Structural validation and package creation')
-          subprocess.run(['bash','-euo','pipefail','-c',step['run']],check=True,env=os.environ.copy())
+          from pathlib import Path
+          import fitz, re, zipfile
+          docx=Path('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx')
+          assert zipfile.is_zipfile(docx)
+          with zipfile.ZipFile(docx) as z:
+              xml=z.read('word/document.xml').decode('utf-8')
+              settings=z.read('word/settings.xml').decode('utf-8')
+          compact=re.sub(r'[\s،,ـ]+','',xml)
+          for required in ['هرموثائقوسجلضبط','خطةتنفيذمئهيوم','تقييموخطهتحسين']:
+              assert required in compact, required
+          assert 'updateFields' in settings
+          pdf=fitz.open('الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf')
+          assert 195 <= len(pdf) <= 215, len(pdf)
+          assert Path('أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.pdf').stat().st_size > 10000
+          assert Path('تقرير_التدقيق_النهائي.txt').stat().st_size > 100
+          print('Structural validation passed; pages=',len(pdf))
           PY
+          mkdir -p final_package
+          cp 'الحوكمة_من_الصفر_النسخة_المصححة_النهائية.docx' final_package/
+          cp 'الحوكمة_من_الصفر_النسخة_المصححة_النهائية.pdf' final_package/
+          cp 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.docx' final_package/
+          cp 'أدوات_الحوكمة_من_الصفر_الدليل_المصاحب.pdf' final_package/
+          cp 'الغلاف_الأمامي_النظيف_300DPI.png' final_package/
+          cp 'الغلاف_الخلفي_النظيف_300DPI.png' final_package/
+          cp 'دليل_الكعب_المصحح_غير_مقاس.png' final_package/
+          cp 'مواصفات_التسليم_والطباعة.docx' final_package/
+          cp 'مواصفات_التسليم_والطباعة.pdf' final_package/
+          cp 'تقرير_التدقيق_النهائي.txt' final_package/
+          cp -r qa_contact_sheets final_package/
+          (cd final_package && zip -9 -r '../الحوكمة_من_الصفر_الحزمة_المصححة_الكاملة.zip' .)
 
       - name: Upload corrected package
         uses: actions/upload-artifact@v4
