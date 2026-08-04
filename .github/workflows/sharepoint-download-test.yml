@@ -1,0 +1,55 @@
+name: Test SharePoint direct document download
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/sharepoint-download-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Try direct download candidates
+        env:
+          SOURCE_SHARE: 'IQApWOFoWfsNRKvoD39OXIVvAcrhiPUREBsNNeQkreV0rYw'
+          COMP_SHARE: 'IQDEkb4UNmijSLLPqYYFUM6ZAXlXCfYzbCeV5rsPGwJCV7g'
+        run: |
+          set -u
+          python - <<'PY'
+          import os, subprocess, zipfile
+          tenant='https://iacademyap-my.sharepoint.com'
+          personal='/personal/iaa_iacademyap_com'
+          shares=[('source',os.environ['SOURCE_SHARE']),('companion',os.environ['COMP_SHARE'])]
+          for name,token in shares:
+              urls=[
+                  f'{tenant}/:w:/p/iaa/{token}?download=1',
+                  f'{tenant}{personal}/_layouts/15/download.aspx?share={token}',
+                  f'{tenant}{personal}/_layouts/15/guestaccess.aspx?share={token}&download=1',
+              ]
+              ok=False
+              for i,url in enumerate(urls,1):
+                  path=f'{name}-{i}.bin'
+                  print('\nTRY',name,i,url,flush=True)
+                  r=subprocess.run(['curl','-L','--fail','--retry','2','-A','Mozilla/5.0',url,'-o',path])
+                  if r.returncode!=0:
+                      print('curl failed'); continue
+                  size=os.path.getsize(path); print('size',size)
+                  print(subprocess.run(['file',path],capture_output=True,text=True).stdout.strip())
+                  if zipfile.is_zipfile(path):
+                      with zipfile.ZipFile(path) as z:
+                          if 'word/document.xml' in z.namelist():
+                              os.rename(path,f'{name}.docx'); ok=True; print('VALID DOCX'); break
+                  print(open(path,'rb').read(160))
+              if not ok: raise SystemExit(f'No valid direct URL for {name}')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sharepoint-direct-downloads
+          path: |
+            source.docx
+            companion.docx
+          retention-days: 1
