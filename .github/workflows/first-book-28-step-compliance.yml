@@ -15,9 +15,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      INTERIOR_URL: 'https://sdmntprseasia.oaiusercontent.com/files/00000000-df08-8207-9808-9681a0661386/raw?se=2026-08-05T07:21:28Z&sp=r&sv=2026-02-06&sr=b&scid=c930eeaa-c00f-5399-88aa-0f63df4cdf08&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:51:11Z&ske=2026-08-06T01:51:11Z&sks=b&skv=2026-02-06&sig=e7AQhEx1MBG6H31ZBfuNSJ32IM9lwkO7ENGzUV2DcFM%3D'
-      FRONT_URL: 'https://sdmntprkoreacentral.oaiusercontent.com/files/00000000-1998-8206-9823-c6e6b4a80c3f/raw?se=2026-08-05T07:21:48Z&sp=r&sv=2026-02-06&sr=b&scid=3ead990a-3e59-59d6-80e6-cea3337f2dbd&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:51:34Z&ske=2026-08-06T01:51:34Z&sks=b&skv=2026-02-06&sig=/tCvY69A9ETVUhMWQyPCWRzN9I9NG%2BeooHh%2BNGAzyRs%3D'
-      BACK_URL: 'https://sdmntprkoreacentral.oaiusercontent.com/files/00000000-5ef0-8206-b895-50e8691d2d1c/raw?se=2026-08-05T07:22:03Z&sp=r&sv=2026-02-06&sr=b&scid=c3de3f4c-416a-5ec0-8259-f6a2f7f35318&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T00:41:21Z&ske=2026-08-06T00:41:21Z&sks=b&skv=2026-02-06&sig=XRyvo8G8UNB1mJUj6o4N63OIh14dO1GNfkH3jDKeuPk%3D'
+      INTERIOR_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-53b4-8211-a5b8-76d567454f5b/raw?se=2026-08-05T07:26:23Z&sp=r&sv=2026-02-06&sr=b&scid=99245a4c-cc0c-57c8-95be-242880289c78&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:04:07Z&ske=2026-08-06T01:04:07Z&sks=b&skv=2026-02-06&sig=CgF13rERGAJ6euj33B1bWNQ4qOnlutUCSGF6R3%2BFyTQ%3D'
+      FRONT_URL: 'https://sdmntprjapaneast.oaiusercontent.com/files/00000000-910c-8209-b66e-5d05530b4238/raw?se=2026-08-05T07:26:49Z&sp=r&sv=2026-02-06&sr=b&scid=99234be1-b2e0-5cc9-9f19-d7d0af69a6f2&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T02:14:57Z&ske=2026-08-06T02:14:57Z&sks=b&skv=2026-02-06&sig=pWhRXjsBWbsiQVMXROPmqjG0ySn%2Br4VN0pA0xARfwXI%3D'
+      BACK_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-1ba4-8208-ac07-b9c5addd2823/raw?se=2026-08-05T07:27:11Z&sp=r&sv=2026-02-06&sr=b&scid=fd32e16b-2037-5a71-b4d0-993b902ee312&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T03:25:19Z&ske=2026-08-06T03:25:19Z&sks=b&skv=2026-02-06&sig=PePVViE27G/35e09PtoWxBwCoTF%2BcjjOQk3slj6ymKE%3D'
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +44,50 @@ jobs:
           fc-match 'Amiri'
           fc-match 'Amiri Quran'
           fc-match 'Noto Kufi Arabic'
+
+      - name: Patch compliance script
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/first_book_28_step_compliance.py')
+          s = p.read_text(encoding='utf-8')
+
+          start = s.index('def build_readme(audit):')
+          end = s.index('\ndef package():', start)
+          replacement = '''def build_readme(audit):
+              text = (
+                  "الحوكمة من الصفر — حزمة المراجعة الشاملة\\n\\n"
+                  f"عدد صفحات نسخة PDF للمراجعة: {audit['pdf_pages']}\\n"
+                  "تحتوي الحزمة على:\\n"
+                  "- النسخة النهائية المطابقة لمعيار Word.\\n"
+                  "- PDF للمراجعة البصرية، وليس شهادة PDF/X-4.\\n"
+                  "- تقرير مطابقة الخطوات الثماني والعشرين Word وPDF.\\n"
+                  "- قالب الغلاف الأمامي Word وPNG بدقة 300 DPI.\\n"
+                  "- قالب الغلاف الخلفي والكعب Word وPNG.\\n"
+                  "- ملف التدقيق الآلي ولوحات مراجعة جميع الصفحات.\\n\\n"
+                  "البيانات الخارجية المتبقية: اسم المؤلف، السيرة، الناشر والشعار والموقع، ISBN والباركود وQR والتصنيف والسعر، ونوع الورق وسماكته وعرض الكعب واعتماد المطبعة.\\n"
+              )
+              README.write_text(text, encoding="utf-8")
+          '''
+          replacement = '\n'.join(line[12:] if line.startswith('            ') else line for line in replacement.splitlines()) + '\n'
+          s = s[:start] + replacement + s[end+1:]
+
+          old = '''        if is_box:
+              stats["boxes"] += 1
+              set_table_borders(table, color=LIGHT_GRAY, sz="0", side_accent=True)
+          '''
+          new = '''        if is_box:
+              stats["boxes"] += 1
+              trpr = table.rows[0]._tr.get_or_add_trPr()
+              if trpr.find(qn("w:cantSplit")) is None:
+                  trpr.append(OxmlElement("w:cantSplit"))
+              set_table_borders(table, color=LIGHT_GRAY, sz="0", side_accent=True)
+          '''
+          if old not in s:
+              raise SystemExit('Editorial-box patch target was not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
 
       - name: Syntax check
         run: python -m py_compile scripts/first_book_28_step_compliance.py
