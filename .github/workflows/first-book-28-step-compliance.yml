@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      INTERIOR_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-8c48-8208-a2ec-919579d1226f/raw?se=2026-08-05T07:30:11Z&sp=r&sv=2026-02-06&sr=b&scid=99d99fc2-4cf6-5229-babb-f55206d59d9c&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-04T22:03:07Z&ske=2026-08-05T22:03:07Z&sks=b&skv=2026-02-06&sig=sGEnRlQeUr6IwpzC806D8o4EECnlCj/dM/AUuI72JcI%3D'
+      INTERIOR_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-5d04-8211-95b7-51b0e1c1b652/raw?se=2026-08-05T07:33:08Z&sp=r&sv=2026-02-06&sr=b&scid=6b895d51-3cd7-55e1-93d0-af8a50a61885&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:35:36Z&ske=2026-08-06T01:35:36Z&sks=b&skv=2026-02-06&sig=zMHq1MLBicmGT4iixGRYF%2B/PSMmmI1ma04lE5QjHnC4%3D'
     steps:
       - uses: actions/checkout@v4
 
@@ -78,6 +78,13 @@ jobs:
           if needle not in s:
               raise SystemExit('Editorial-box block was not found')
           s = s.replace(needle, addition, 1)
+
+          old_cover = '    p = doc.paragraphs[0]\n    p.alignment = WD_ALIGN_PARAGRAPH.CENTER\n'
+          new_cover = '    p = doc.paragraphs[0] if doc.paragraphs else doc.add_paragraph()\n    p.alignment = WD_ALIGN_PARAGRAPH.CENTER\n'
+          if old_cover not in s:
+              raise SystemExit('Cover paragraph constructor was not found')
+          s = s.replace(old_cover, new_cover, 1)
+
           p.write_text(s, encoding='utf-8')
           PY
 
