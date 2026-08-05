@@ -1,0 +1,80 @@
+name: First book final review
+
+on:
+  push:
+    branches: [first-book-final-review]
+    paths:
+      - 'scripts/review_first_book.py'
+      - '.github/workflows/first-book-final-review.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SOURCE_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-5ad4-8208-ab09-e466b426b5fb/raw?se=2026-08-05T06:10:29Z&sp=r&sv=2026-02-06&sr=b&scid=4d6607bf-309f-552d-a9b4-109c4039bbb6&skoid=ca37c3ec-ab43-496e-be5f-4684c5519a26&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T02:25:09Z&ske=2026-08-06T02:25:09Z&sks=b&skv=2026-02-06&sig=3wzlq9mb%2B3DRW1V7whnjJ7TSQWXs7tsrASWnmxRzsKU%3D'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: first-book-final-review
+
+      - name: Download latest first-book file
+        run: |
+          curl --fail --location --retry 4 --retry-delay 2 --user-agent 'Mozilla/5.0' "$SOURCE_URL" -o source.docx
+          test -s source.docx
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('source.docx')
+          assert p.read_bytes()[:2] == b'PK'
+          print('source_bytes',p.stat().st_size)
+          PY
+
+      - name: Install document tools and Arabic fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-writer python3-uno poppler-utils fonts-noto-core fonts-hosny-amiri
+          python -m pip install --quiet python-docx lxml pymupdf pillow
+          fc-cache -f
+          fc-match 'Amiri'
+          fc-match 'Noto Kufi Arabic'
+
+      - name: Syntax check
+        run: python -m py_compile scripts/review_first_book.py
+
+      - name: Review, correct, render and audit
+        run: |
+          python scripts/review_first_book.py
+          test -s 'output/الحوكمة_من_الصفر_النسخة_النهائية_المراجعة.docx'
+          test -s 'output/الحوكمة_من_الصفر_النسخة_النهائية_المراجعة.pdf'
+          test -s 'output/audit.json'
+          test -f 'docx_package/[Content_Types].xml'
+          test -f 'qa_docx_package/[Content_Types].xml'
+
+      - name: Upload final DOCX package
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-book-final-docx-package
+          path: docx_package/**
+          include-hidden-files: true
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Upload visual review DOCX package
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-book-visual-review-package
+          path: qa_docx_package/**
+          include-hidden-files: true
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-book-audit
+          path: output/audit.json
+          retention-days: 2
+          if-no-files-found: error
