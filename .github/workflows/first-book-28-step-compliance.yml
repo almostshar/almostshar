@@ -15,9 +15,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      INTERIOR_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQDkSL1nGt9XR6ivPyEkmZX7AYt7uhW_czzdcbZlHzO0pYE?download=1'
-      FRONT_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBBFVT4sVQyTKTHExRp1mK0ATtJ8l9lD9CnYW45kw4Pg08?download=1'
-      BACK_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBGli-FqpCXQbEdcWpjXqVWAYQVsFQKdiuz5KalTz5vMOw?download=1'
+      INTERIOR_URL: 'https://iacademyap-my.sharepoint.com/personal/iaa_iacademyap_com/_layouts/15/download.aspx?UniqueId=67BD48E4-DF1A-4757-A8AF-3F21249995FB'
+      FRONT_URL: 'https://iacademyap-my.sharepoint.com/personal/iaa_iacademyap_com/_layouts/15/download.aspx?UniqueId=F8541541-54B1-4C32-A4C7-131469D662B4'
+      BACK_URL: 'https://iacademyap-my.sharepoint.com/personal/iaa_iacademyap_com/_layouts/15/download.aspx?UniqueId=852F9646-90AA-4197-B11D-716A635EA556'
     steps:
       - uses: actions/checkout@v4
 
@@ -30,9 +30,9 @@ jobs:
           from pathlib import Path
           for name in ('source_interior.docx','source_front.docx','source_back_spine.docx'):
               p=Path(name)
+              print(name,p.stat().st_size,p.read_bytes()[:16])
               assert p.exists() and p.stat().st_size>1000, (name,p.stat().st_size if p.exists() else None)
               assert p.read_bytes()[:2] == b'PK', f'{name} is not a DOCX ZIP package'
-              print(name,p.stat().st_size)
           PY
 
       - name: Install Word, PDF and Arabic rendering dependencies
