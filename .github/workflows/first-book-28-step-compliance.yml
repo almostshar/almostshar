@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      INTERIOR_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-5d04-8211-95b7-51b0e1c1b652/raw?se=2026-08-05T07:33:08Z&sp=r&sv=2026-02-06&sr=b&scid=6b895d51-3cd7-55e1-93d0-af8a50a61885&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:35:36Z&ske=2026-08-06T01:35:36Z&sks=b&skv=2026-02-06&sig=zMHq1MLBicmGT4iixGRYF%2B/PSMmmI1ma04lE5QjHnC4%3D'
+      INTERIOR_URL: 'https://sdmntprseasia.oaiusercontent.com/files/00000000-f13c-8207-9888-98858210ecbf/raw?se=2026-08-05T07:35:52Z&sp=r&sv=2026-02-06&sr=b&scid=ae288eb6-67b9-5614-b96f-1d9a1014bfbd&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:16:46Z&ske=2026-08-06T01:16:46Z&sks=b&skv=2026-02-06&sig=vPHelwAsQaV/wRBMzn61flGyDCfZsbIYQDAJbBvua%2BE%3D'
     steps:
       - uses: actions/checkout@v4
 
@@ -84,6 +84,20 @@ jobs:
           if old_cover not in s:
               raise SystemExit('Cover paragraph constructor was not found')
           s = s.replace(old_cover, new_cover, 1)
+
+          old_alignment = '''        if group=="justified" and p.alignment not in (WD_ALIGN_PARAGRAPH.JUSTIFY,None): bad_align.append((i,name,"not_justified"))
+              if group in ("right","right_heading") and p.alignment not in (WD_ALIGN_PARAGRAPH.RIGHT,None): bad_align.append((i,name,"not_right"))
+          '''
+          old_alignment = '\n'.join(line[12:] if line.startswith('            ') else line for line in old_alignment.splitlines()) + '\n'
+          new_alignment = '''        jc = p._p.get_or_add_pPr().find(qn("w:jc"))
+              align_token = jc.get(qn("w:val")) if jc is not None else None
+              if group=="justified" and align_token not in ("both","distribute",None): bad_align.append((i,name,"not_justified",align_token))
+              if group in ("right","right_heading") and align_token not in ("right","end",None): bad_align.append((i,name,"not_right",align_token))
+          '''
+          new_alignment = '\n'.join(line[12:] if line.startswith('            ') else line for line in new_alignment.splitlines()) + '\n'
+          if old_alignment not in s:
+              raise SystemExit('Alignment audit block was not found')
+          s = s.replace(old_alignment, new_alignment, 1)
 
           p.write_text(s, encoding='utf-8')
           PY
