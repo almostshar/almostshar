@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      INTERIOR_URL: 'https://sdmntprseasia.oaiusercontent.com/files/00000000-f13c-8207-9888-98858210ecbf/raw?se=2026-08-05T07:35:52Z&sp=r&sv=2026-02-06&sr=b&scid=ae288eb6-67b9-5614-b96f-1d9a1014bfbd&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:16:46Z&ske=2026-08-06T01:16:46Z&sks=b&skv=2026-02-06&sig=vPHelwAsQaV/wRBMzn61flGyDCfZsbIYQDAJbBvua%2BE%3D'
+      INTERIOR_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-eff4-8208-88c6-d18231dbfc2d/raw?se=2026-08-05T07:39:34Z&sp=r&sv=2026-02-06&sr=b&scid=38b83db9-5544-54a1-8fef-c6a682608c98&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T03:25:43Z&ske=2026-08-06T03:25:43Z&sks=b&skv=2026-02-06&sig=dUdLzSDvWfKM6yV3acMO%2B3N0819NRvB2%2Bu6pieFaWSg%3D'
     steps:
       - uses: actions/checkout@v4
 
@@ -85,19 +85,18 @@ jobs:
               raise SystemExit('Cover paragraph constructor was not found')
           s = s.replace(old_cover, new_cover, 1)
 
-          old_alignment = '''        if group=="justified" and p.alignment not in (WD_ALIGN_PARAGRAPH.JUSTIFY,None): bad_align.append((i,name,"not_justified"))
-              if group in ("right","right_heading") and p.alignment not in (WD_ALIGN_PARAGRAPH.RIGHT,None): bad_align.append((i,name,"not_right"))
-          '''
-          old_alignment = '\n'.join(line[12:] if line.startswith('            ') else line for line in old_alignment.splitlines()) + '\n'
-          new_alignment = '''        jc = p._p.get_or_add_pPr().find(qn("w:jc"))
-              align_token = jc.get(qn("w:val")) if jc is not None else None
-              if group=="justified" and align_token not in ("both","distribute",None): bad_align.append((i,name,"not_justified",align_token))
-              if group in ("right","right_heading") and align_token not in ("right","end",None): bad_align.append((i,name,"not_right",align_token))
-          '''
-          new_alignment = '\n'.join(line[12:] if line.startswith('            ') else line for line in new_alignment.splitlines()) + '\n'
-          if old_alignment not in s:
-              raise SystemExit('Alignment audit block was not found')
-          s = s.replace(old_alignment, new_alignment, 1)
+          line1 = '        if group=="justified" and p.alignment not in (WD_ALIGN_PARAGRAPH.JUSTIFY,None): bad_align.append((i,name,"not_justified"))'
+          line2 = '        if group in ("right","right_heading") and p.alignment not in (WD_ALIGN_PARAGRAPH.RIGHT,None): bad_align.append((i,name,"not_right"))'
+          if line1 not in s or line2 not in s:
+              raise SystemExit('Alignment audit lines were not found')
+          replacement1 = (
+              '        jc = p._p.get_or_add_pPr().find(qn("w:jc"))\n'
+              '        align_token = jc.get(qn("w:val")) if jc is not None else None\n'
+              '        if group=="justified" and align_token not in ("both","distribute",None): bad_align.append((i,name,"not_justified",align_token))'
+          )
+          replacement2 = '        if group in ("right","right_heading") and align_token not in ("right","end",None): bad_align.append((i,name,"not_right",align_token))'
+          s = s.replace(line1, replacement1, 1)
+          s = s.replace(line2, replacement2, 1)
 
           p.write_text(s, encoding='utf-8')
           PY
