@@ -1,0 +1,43 @@
+name: Publish first-book visual review
+
+on:
+  push:
+    branches: [first-book-final-review]
+    paths:
+      - '.github/workflows/visual-review-publish.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      QA_SOURCE_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-7448-8211-95e6-b3cb4502183e/raw?se=2026-08-05T06:45:33Z&sp=r&sv=2026-02-06&sr=b&scid=47bb71a1-de2c-5345-8f41-82d4cd65b9cd&skoid=ca37c3ec-ab43-496e-be5f-4684c5519a26&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:42:07Z&ske=2026-08-06T01:42:07Z&sks=b&skv=2026-02-06&sig=EFu09iZWUSYsXuQS3wdQBSrOv8Yw1HNQHeXgAT9tAEY%3D'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: first-book-final-review
+
+      - name: Download visual review document
+        run: |
+          curl --fail --location --retry 4 --retry-delay 2 "$QA_SOURCE_URL" -o visual_review.docx
+          test -s visual_review.docx
+
+      - name: Convert contact sheets to PDF
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-writer fonts-noto-core fonts-hosny-amiri
+          mkdir -p visual_review
+          soffice --headless --convert-to pdf --outdir visual_review visual_review.docx
+          mv visual_review/visual_review.pdf visual_review/first_book_contact_sheets.pdf
+          test -s visual_review/first_book_contact_sheets.pdf
+
+      - name: Commit review PDF
+        run: |
+          git config user.name 'book-review-bot'
+          git config user.email 'book-review-bot@users.noreply.github.com'
+          git add visual_review/first_book_contact_sheets.pdf
+          git commit -m 'Add first-book visual review contact sheets'
+          git push origin HEAD:first-book-final-review
