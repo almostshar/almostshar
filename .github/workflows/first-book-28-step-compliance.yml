@@ -15,17 +15,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      INTERIOR_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-a2c4-8208-ba02-cad4c08c5983/raw?se=2026-08-05T07:03:26Z&sp=r&sv=2026-02-06&sr=b&scid=a2af3463-1483-5cc3-8e42-892f7eb5f630&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T03:25:42Z&ske=2026-08-06T03:25:42Z&sks=b&skv=2026-02-06&sig=vY4laE%2BbWK62gwWF8WFg0KMWrwgBdpkBRJyaZPECgeY%3D'
-      FRONT_URL: 'https://sdmntprjapaneast.oaiusercontent.com/files/00000000-0ee4-8209-8c22-1c21ba51cc6c/raw?se=2026-08-05T07:03:45Z&sp=r&sv=2026-02-06&sr=b&scid=a174887f-2baa-51e9-b335-cdff7a00a8cb&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-04T22:41:43Z&ske=2026-08-05T22:41:43Z&sks=b&skv=2026-02-06&sig=Q2Qsd0JZNbsQoFTLVqjyk1HDt/59MaX4mLqai8r0fM8%3D'
-      BACK_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-89c8-8211-90b5-d7e777a606c3/raw?se=2026-08-05T07:04:00Z&sp=r&sv=2026-02-06&sr=b&scid=bab75d29-5505-50f7-935d-40faae86c220&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:51:33Z&ske=2026-08-06T01:51:33Z&sks=b&skv=2026-02-06&sig=AOlwNFN5dHMlMVPQqqqSTFE/d34ZH1V6ePVrTTqr0ZI%3D'
+      INTERIOR_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQDkSL1nGt9XR6ivPyEkmZX7AYt7uhW_czzdcbZlHzO0pYE?download=1'
+      FRONT_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBBFVT4sVQyTKTHExRp1mK0ATtJ8l9lD9CnYW45kw4Pg08?download=1'
+      BACK_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBGli-FqpCXQbEdcWpjXqVWAYQVsFQKdiuz5KalTz5vMOw?download=1'
     steps:
       - uses: actions/checkout@v4
 
       - name: Download exact source files
         run: |
-          curl --fail --location --retry 4 --retry-delay 2 "$INTERIOR_URL" -o source_interior.docx
-          curl --fail --location --retry 4 --retry-delay 2 "$FRONT_URL" -o source_front.docx
-          curl --fail --location --retry 4 --retry-delay 2 "$BACK_URL" -o source_back_spine.docx
+          curl --fail --location --retry 4 --retry-delay 2 --user-agent 'Mozilla/5.0' "$INTERIOR_URL" -o source_interior.docx
+          curl --fail --location --retry 4 --retry-delay 2 --user-agent 'Mozilla/5.0' "$FRONT_URL" -o source_front.docx
+          curl --fail --location --retry 4 --retry-delay 2 --user-agent 'Mozilla/5.0' "$BACK_URL" -o source_back_spine.docx
           python - <<'PY'
           from pathlib import Path
           for name in ('source_interior.docx','source_front.docx','source_back_spine.docx'):
