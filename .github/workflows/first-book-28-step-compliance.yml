@@ -15,25 +15,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      INTERIOR_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQDkSL1nGt9XR6ivPyEkmZX7AYt7uhW_czzdcbZlHzO0pYE?download=1'
-      FRONT_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBBFVT4sVQyTKTHExRp1mK0ATtJ8l9lD9CnYW45kw4Pg08?download=1'
-      BACK_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBGli-FqpCXQbEdcWpjXqVWAYQVsFQKdiuz5KalTz5vMOw?download=1'
+      INTERIOR_URL: 'https://sdmntprseasia.oaiusercontent.com/files/00000000-df08-8207-9808-9681a0661386/raw?se=2026-08-05T07:21:28Z&sp=r&sv=2026-02-06&sr=b&scid=c930eeaa-c00f-5399-88aa-0f63df4cdf08&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:51:11Z&ske=2026-08-06T01:51:11Z&sks=b&skv=2026-02-06&sig=e7AQhEx1MBG6H31ZBfuNSJ32IM9lwkO7ENGzUV2DcFM%3D'
+      FRONT_URL: 'https://sdmntprkoreacentral.oaiusercontent.com/files/00000000-1998-8206-9823-c6e6b4a80c3f/raw?se=2026-08-05T07:21:48Z&sp=r&sv=2026-02-06&sr=b&scid=3ead990a-3e59-59d6-80e6-cea3337f2dbd&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:51:34Z&ske=2026-08-06T01:51:34Z&sks=b&skv=2026-02-06&sig=/tCvY69A9ETVUhMWQyPCWRzN9I9NG%2BeooHh%2BNGAzyRs%3D'
+      BACK_URL: 'https://sdmntprkoreacentral.oaiusercontent.com/files/00000000-5ef0-8206-b895-50e8691d2d1c/raw?se=2026-08-05T07:22:03Z&sp=r&sv=2026-02-06&sr=b&scid=c3de3f4c-416a-5ec0-8259-f6a2f7f35318&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T00:41:21Z&ske=2026-08-06T00:41:21Z&sks=b&skv=2026-02-06&sig=XRyvo8G8UNB1mJUj6o4N63OIh14dO1GNfkH3jDKeuPk%3D'
     steps:
       - uses: actions/checkout@v4
 
       - name: Download exact source files
         run: |
-          curl --fail --location --retry 4 --retry-delay 2 --user-agent 'Mozilla/5.0' "$INTERIOR_URL" -o source_interior.docx
-          curl --fail --location --retry 4 --retry-delay 2 --user-agent 'Mozilla/5.0' "$FRONT_URL" -o source_front.docx
-          curl --fail --location --retry 4 --retry-delay 2 --user-agent 'Mozilla/5.0' "$BACK_URL" -o source_back_spine.docx
-          if [ "$(head -c 2 source_interior.docx)" != "PK" ]; then
-            echo '--- SHAREPOINT HTML DIAGNOSTIC ---'
-            file source_interior.docx || true
-            head -c 700 source_interior.docx || true
-            echo
-            grep -Eio '.{0,120}(downloadUrl|download\.aspx|FileGet|WOPISrc|WopiFrame|\.docx).{0,300}' source_interior.docx | head -30 || true
-            echo '--- END DIAGNOSTIC ---'
-          fi
+          curl --fail --location --retry 4 --retry-delay 1 "$INTERIOR_URL" -o source_interior.docx
+          curl --fail --location --retry 4 --retry-delay 1 "$FRONT_URL" -o source_front.docx
+          curl --fail --location --retry 4 --retry-delay 1 "$BACK_URL" -o source_back_spine.docx
           python - <<'PY'
           from pathlib import Path
           for name in ('source_interior.docx','source_front.docx','source_back_spine.docx'):
