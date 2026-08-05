@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_URL: 'https://sdmntprseasia.oaiusercontent.com/files/00000000-ebec-8207-9441-0ef903f45234/raw?se=2026-08-05T06:19:54Z&sp=r&sv=2026-02-06&sr=b&scid=fbb5839f-078a-5df7-a331-256b7de79278&skoid=ca37c3ec-ab43-496e-be5f-4684c5519a26&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T02:25:29Z&ske=2026-08-06T02:25:29Z&sks=b&skv=2026-02-06&sig=nmVgqgbgl/7DODu5JYixvNOcRHuOH%2B0BIPBIqH0mbtc%3D'
+      SOURCE_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-84d0-8208-8b91-1f1ddd488baf/raw?se=2026-08-05T06:23:23Z&sp=r&sv=2026-02-06&sr=b&scid=d31aec33-8207-514b-a058-b44328cedd18&skoid=ca37c3ec-ab43-496e-be5f-4684c5519a26&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T00:55:20Z&ske=2026-08-06T00:55:20Z&sks=b&skv=2026-02-06&sig=xfjcNzOwykJhdggn6CDzdTDT4f5UrSNzOhyqI4kYLlY%3D'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,7 +47,10 @@ jobs:
           from pathlib import Path
           p=Path('scripts/review_first_book.py')
           s=p.read_text(encoding='utf-8')
-          s=s.replace('            p.paragraph_format.page_break_after = True\n','')
+          s=s.replace('from docx.enum.text import WD_ALIGN_PARAGRAPH\n','from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK\n')
+          s=s.replace('        if CHAPTER_RE.match(text):\n            chapter_titles.append(text)\n','        if CHAPTER_RE.match(text) and st == "Chapter Title":\n            chapter_titles.append(text)\n')
+          s=s.replace('        if text and arabic_ratio(text) >= .30 and p.alignment == WD_ALIGN_PARAGRAPH.LEFT and st != "References":\n            rtl_violations.append("LEFT:" + text[:110])\n','        jc = p._p.pPr.find(qn("w:jc")) if p._p.pPr is not None else None\n        jc_val = jc.get(qn("w:val")) if jc is not None else None\n        if text and arabic_ratio(text) >= .30 and jc_val in {"left", "end"} and st != "References":\n            rtl_violations.append("LEFT:" + text[:110])\n')
+          s=s.replace('            p.add_run().add_break()\n            p.paragraph_format.page_break_after = True\n','            p.add_run().add_break(WD_BREAK.PAGE)\n')
           p.write_text(s,encoding='utf-8')
           PY
           python -m py_compile scripts/review_first_book.py
