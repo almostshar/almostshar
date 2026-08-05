@@ -5,6 +5,7 @@ on:
     branches: [first-book-final-review]
     paths:
       - 'scripts/review_first_book.py'
+      - 'scripts/recto_patch.py'
       - '.github/workflows/first-book-final-review.yml'
 
 permissions:
@@ -27,9 +28,9 @@ jobs:
           test -s source.docx
           python - <<'PY'
           from pathlib import Path
-          p=Path('source.docx')
+          p = Path('source.docx')
           assert p.read_bytes()[:2] == b'PK'
-          print('source_bytes',p.stat().st_size)
+          print('source_bytes', p.stat().st_size)
           PY
 
       - name: Install document tools and Arabic fonts
@@ -45,96 +46,45 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          p=Path('scripts/review_first_book.py')
-          s=p.read_text(encoding='utf-8')
-          s=s.replace('from docx.enum.text import WD_ALIGN_PARAGRAPH\n','from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK\n')
-          s=s.replace('        if i >= 2:\n            sec.start_type = WD_SECTION.ODD_PAGE\n','')
-          s=s.replace('        if CHAPTER_RE.match(text):\n            chapter_titles.append(text)\n','        if CHAPTER_RE.match(text) and st == "Chapter Title":\n            chapter_titles.append(text)\n')
-          s=s.replace('        if text and arabic_ratio(text) >= .30 and p.alignment == WD_ALIGN_PARAGRAPH.LEFT and st != "References":\n            rtl_violations.append("LEFT:" + text[:110])\n','        jc = p._p.pPr.find(qn("w:jc")) if p._p.pPr is not None else None\n        jc_val = jc.get(qn("w:val")) if jc is not None else None\n        if text and arabic_ratio(text) >= .30 and jc_val in {"left", "end"} and st != "References":\n            rtl_violations.append("LEFT:" + text[:110])\n')
-          s=s.replace('            p.add_run().add_break()\n            p.paragraph_format.page_break_after = True\n','            p.add_run().add_break(WD_BREAK.PAGE)\n')
-          s=s.replace('    p = doc.paragraphs[0]\n','    p = doc.add_paragraph()\n')
-
-          anchor='def format_note_xml(docx_path: Path):\n'
-          recto_func=r'''def force_chapter_recto_breaks(docx_path: Path):
-    """Change only the existing section breaks immediately before real chapter titles to odd-page breaks."""
-    from lxml import etree
-    tmp = OUT / "recto_patch"
-    if tmp.exists():
-        shutil.rmtree(tmp)
-    tmp.mkdir()
-    with zipfile.ZipFile(docx_path) as z:
-        z.extractall(tmp)
-    document_path = tmp / "word/document.xml"
-    styles_path = tmp / "word/styles.xml"
-    doc_tree = etree.parse(str(document_path))
-    styles_tree = etree.parse(str(styles_path))
-    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    matches = styles_tree.xpath('//w:style[w:name[@w:val="Chapter Title"]]', namespaces=ns)
-    if not matches:
-        raise RuntimeError("Chapter Title style was not found")
-    chapter_style_id = matches[0].get(qn("w:styleId"))
-    body = doc_tree.find('.//' + qn("w:body"))
-    children = list(body)
-    chapter_paragraphs = []
-    for el in children:
-        if el.tag != qn("w:p"):
-            continue
-        pstyle = el.find('.//' + qn("w:pStyle"))
-        text = ''.join(el.xpath('.//w:t/text()', namespaces=ns)).strip()
-        if pstyle is not None and pstyle.get(qn("w:val")) == chapter_style_id and CHAPTER_RE.match(text):
-            chapter_paragraphs.append((el, text))
-    updated = 0
-    missing = []
-    for chapter, text in chapter_paragraphs:
-        idx = children.index(chapter)
-        sectpr = None
-        for j in range(idx - 1, max(-1, idx - 8), -1):
-            candidate = children[j]
-            if candidate.tag != qn("w:p"):
-                continue
-            ppr = candidate.find(qn("w:pPr"))
-            found = ppr.find(qn("w:sectPr")) if ppr is not None else None
-            if found is not None:
-                sectpr = found
-                break
-        if sectpr is None:
-            # The first chapter can already be the first paragraph of its section.
-            missing.append(text)
-            continue
-        typ = sectpr.find(qn("w:type"))
-        if typ is None:
-            typ = etree.Element(qn("w:type"))
-            sectpr.insert(0, typ)
-        typ.set(qn("w:val"), "oddPage")
-        updated += 1
-    if len(chapter_paragraphs) != 15:
-        raise RuntimeError(f"Expected 15 real chapter paragraphs, found {len(chapter_paragraphs)}")
-    if updated < 14:
-        raise RuntimeError(f"Only {updated} chapter section breaks could be set to odd-page; missing={missing}")
-    doc_tree.write(str(document_path), xml_declaration=True, encoding="UTF-8", standalone="yes")
-    patched = OUT / "recto_patched.docx"
-    with zipfile.ZipFile(patched, "w", zipfile.ZIP_DEFLATED) as z:
-        for item in tmp.rglob("*"):
-            if item.is_file():
-                z.write(item, item.relative_to(tmp))
-    shutil.copy2(patched, docx_path)
-    shutil.rmtree(tmp)
-    print("chapter_recto_breaks_updated", updated, "without_preceding_break", missing)
-
-
-'''
-          if anchor not in s:
-              raise SystemExit('Could not find note-formatting anchor')
-          s=s.replace(anchor, recto_func+anchor)
-          s=s.replace('    doc.save(WORK)\n    format_note_xml(WORK)\n','    doc.save(WORK)\n    force_chapter_recto_breaks(WORK)\n    format_note_xml(WORK)\n')
-
-          start=s.index('def run_libreoffice():')
-          end=s.index('\ndef inspect_docx', start)
-          render_only='''def run_libreoffice():\n    shutil.copy2(WORK, FINAL)\n    subprocess.run([\n        "soffice", "--headless", "--convert-to", "pdf",\n        "--outdir", str(OUT), str(FINAL)\n    ], check=True)\n    generated = OUT / (FINAL.stem + ".pdf")\n    if not generated.exists():\n        raise RuntimeError("PDF rendering failed")\n    if generated != PDF:\n        generated.replace(PDF)\n\n'''
-          s=s[:start]+render_only+s[end+1:]
-          p.write_text(s,encoding='utf-8')
+          p = Path('scripts/review_first_book.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace(
+              'from pathlib import Path\n',
+              'from pathlib import Path\nfrom recto_patch import force_chapter_recto_breaks\n',
+              1,
+          )
+          s = s.replace(
+              'from docx.enum.text import WD_ALIGN_PARAGRAPH\n',
+              'from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK\n',
+          )
+          s = s.replace(
+              '        if i >= 2:\n            sec.start_type = WD_SECTION.ODD_PAGE\n',
+              '',
+          )
+          s = s.replace(
+              '        if CHAPTER_RE.match(text):\n            chapter_titles.append(text)\n',
+              '        if CHAPTER_RE.match(text) and st == "Chapter Title":\n            chapter_titles.append(text)\n',
+          )
+          s = s.replace(
+              '        if text and arabic_ratio(text) >= .30 and p.alignment == WD_ALIGN_PARAGRAPH.LEFT and st != "References":\n            rtl_violations.append("LEFT:" + text[:110])\n',
+              '        jc = p._p.pPr.find(qn("w:jc")) if p._p.pPr is not None else None\n        jc_val = jc.get(qn("w:val")) if jc is not None else None\n        if text and arabic_ratio(text) >= .30 and jc_val in {"left", "end"} and st != "References":\n            rtl_violations.append("LEFT:" + text[:110])\n',
+          )
+          s = s.replace(
+              '            p.add_run().add_break()\n            p.paragraph_format.page_break_after = True\n',
+              '            p.add_run().add_break(WD_BREAK.PAGE)\n',
+          )
+          s = s.replace('    p = doc.paragraphs[0]\n', '    p = doc.add_paragraph()\n')
+          s = s.replace(
+              '    doc.save(WORK)\n    format_note_xml(WORK)\n',
+              '    doc.save(WORK)\n    print("recto_patch", force_chapter_recto_breaks(WORK))\n    format_note_xml(WORK)\n',
+          )
+          start = s.index('def run_libreoffice():')
+          end = s.index('\ndef inspect_docx', start)
+          render_only = '''def run_libreoffice():\n    shutil.copy2(WORK, FINAL)\n    subprocess.run([\n        "soffice", "--headless", "--convert-to", "pdf",\n        "--outdir", str(OUT), str(FINAL)\n    ], check=True)\n    generated = OUT / (FINAL.stem + ".pdf")\n    if not generated.exists():\n        raise RuntimeError("PDF rendering failed")\n    if generated != PDF:\n        generated.replace(PDF)\n\n'''
+          s = s[:start] + render_only + s[end + 1:]
+          p.write_text(s, encoding='utf-8')
           PY
-          python -m py_compile scripts/review_first_book.py
+          python -m py_compile scripts/review_first_book.py scripts/recto_patch.py
 
       - name: Review, correct, render and audit
         run: |
