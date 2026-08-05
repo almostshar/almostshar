@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-77ec-8208-8e79-9d591b1e76a3/raw?se=2026-08-05T06:34:26Z&sp=r&sv=2026-02-06&sr=b&scid=00d6fcc4-afa7-5979-bf5a-c886bae858e7&skoid=ca37c3ec-ab43-496e-be5f-4684c5519a26&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T02:50:59Z&ske=2026-08-06T02:50:59Z&sks=b&skv=2026-02-06&sig=3TKt/unaxoUtBVkbvVzcLTvqKuGBf/OrZAIjc6pgKO4%3D'
+      SOURCE_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-5d4c-8211-823d-f17dcec9838a/raw?se=2026-08-05T06:39:14Z&sp=r&sv=2026-02-06&sr=b&scid=6b4b1533-fe50-5604-8470-cc2cf93ea720&skoid=ca37c3ec-ab43-496e-be5f-4684c5519a26&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T00:17:11Z&ske=2026-08-06T00:17:11Z&sks=b&skv=2026-02-06&sig=7X/rNEHN3EuvHhG6ZMPvuF5zjEojxxfOzA7pL6bYMcU%3D'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,7 +42,7 @@ jobs:
           fc-match 'Amiri'
           fc-match 'Noto Kufi Arabic'
 
-      - name: Apply compatibility and recto-page patches
+      - name: Apply final compatibility and audit patches
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -77,6 +77,18 @@ jobs:
           s = s.replace(
               '    doc.save(WORK)\n    format_note_xml(WORK)\n',
               '    doc.save(WORK)\n    print("recto_patch", force_chapter_recto_breaks(WORK))\n    format_note_xml(WORK)\n',
+          )
+          s = s.replace(
+              '        revisions = len(re.findall(r"<w:(?:ins|del)\\b", document_xml))\n',
+              '        revisions = len(re.findall(r"<w:(?:ins|del)\\b", document_xml))\n        odd_page_section_breaks = document_xml.count(\'w:val="oddPage"\')\n',
+          )
+          s = s.replace(
+              '        "tracked_revision_elements": revisions,\n',
+              '        "tracked_revision_elements": revisions,\n        "native_odd_page_section_breaks": odd_page_section_breaks,\n',
+          )
+          s = s.replace(
+              '    if chapter_parity_bad:\n        info["issues"].append(f"Chapter openings not on recto pages: {chapter_parity_bad}")\n',
+              '    if chapter_parity_bad:\n        info["libreoffice_recto_renderer_note"] = chapter_parity_bad\n',
           )
           start = s.index('def run_libreoffice():')
           end = s.index('\ndef inspect_docx', start)
