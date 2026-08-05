@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-5ad4-8208-ab09-e466b426b5fb/raw?se=2026-08-05T06:10:29Z&sp=r&sv=2026-02-06&sr=b&scid=4d6607bf-309f-552d-a9b4-109c4039bbb6&skoid=ca37c3ec-ab43-496e-be5f-4684c5519a26&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T02:25:09Z&ske=2026-08-06T02:25:09Z&sks=b&skv=2026-02-06&sig=3wzlq9mb%2B3DRW1V7whnjJ7TSQWXs7tsrASWnmxRzsKU%3D'
+      SOURCE_URL: 'https://sdmntprseasia.oaiusercontent.com/files/00000000-ebec-8207-9441-0ef903f45234/raw?se=2026-08-05T06:19:54Z&sp=r&sv=2026-02-06&sr=b&scid=fbb5839f-078a-5df7-a331-256b7de79278&skoid=ca37c3ec-ab43-496e-be5f-4684c5519a26&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T02:25:29Z&ske=2026-08-06T02:25:29Z&sks=b&skv=2026-02-06&sig=nmVgqgbgl/7DODu5JYixvNOcRHuOH%2B0BIPBIqH0mbtc%3D'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,8 +41,16 @@ jobs:
           fc-match 'Amiri'
           fc-match 'Noto Kufi Arabic'
 
-      - name: Syntax check
-        run: python -m py_compile scripts/review_first_book.py
+      - name: Apply compatibility patch and syntax check
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/review_first_book.py')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('            p.paragraph_format.page_break_after = True\n','')
+          p.write_text(s,encoding='utf-8')
+          PY
+          python -m py_compile scripts/review_first_book.py
 
       - name: Review, correct, render and audit
         run: |
