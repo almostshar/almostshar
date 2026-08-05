@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      INTERIOR_URL: 'https://sdmntprcentralindia.oaiusercontent.com/files/00000000-eff4-8208-88c6-d18231dbfc2d/raw?se=2026-08-05T07:39:34Z&sp=r&sv=2026-02-06&sr=b&scid=38b83db9-5544-54a1-8fef-c6a682608c98&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T03:25:43Z&ske=2026-08-06T03:25:43Z&sks=b&skv=2026-02-06&sig=dUdLzSDvWfKM6yV3acMO%2B3N0819NRvB2%2Bu6pieFaWSg%3D'
+      INTERIOR_URL: 'https://sdmntprseasia.oaiusercontent.com/files/00000000-3220-8207-b94e-f0e769a4cd77/raw?se=2026-08-05T07:44:26Z&sp=r&sv=2026-02-06&sr=b&scid=0ebe88d1-23a4-5d6d-a06c-a7b846b68d9c&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:51:12Z&ske=2026-08-06T01:51:12Z&sks=b&skv=2026-02-06&sig=E2wIy9s3W6b1JAlAVz762LF/UzaslhTle3gVJ7KCxT8%3D'
     steps:
       - uses: actions/checkout@v4
 
@@ -97,6 +97,27 @@ jobs:
           replacement2 = '        if group in ("right","right_heading") and align_token not in ("right","end",None): bad_align.append((i,name,"not_right",align_token))'
           s = s.replace(line1, replacement1, 1)
           s = s.replace(line2, replacement2, 1)
+
+          export_line = '    subprocess.run(["/usr/bin/python3", str(script)], check=True)\n'
+          export_patch = (
+              export_line
+              + '    normalized = Document(FINAL_DOCX)\n'
+              + '    for sec in normalized.sections:\n'
+              + '        set_geometry(sec)\n'
+              + '    normalized.save(FINAL_DOCX)\n'
+              + '    normalized_pdf = OUT / (FINAL_DOCX.stem + ".pdf")\n'
+              + '    if normalized_pdf.exists():\n'
+              + '        normalized_pdf.unlink()\n'
+              + '    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(OUT), str(FINAL_DOCX)], check=True)\n'
+              + '    if not normalized_pdf.exists():\n'
+              + '        raise RuntimeError("Corrected PDF export was not created")\n'
+              + '    if FINAL_PDF.exists():\n'
+              + '        FINAL_PDF.unlink()\n'
+              + '    normalized_pdf.replace(FINAL_PDF)\n'
+          )
+          if export_line not in s:
+              raise SystemExit('LibreOffice export completion line was not found')
+          s = s.replace(export_line, export_patch, 1)
 
           p.write_text(s, encoding='utf-8')
           PY
