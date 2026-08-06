@@ -108,6 +108,11 @@ jobs:
           if old_drawing not in s:
               raise SystemExit('Drawing detector was not found')
           s=s.replace(old_drawing,new_drawing,1)
+          old_story='                set_bidi_paragraph(p, p.alignment or WD_ALIGN_PARAGRAPH.RIGHT)'
+          new_story='                set_bidi_paragraph(p, WD_ALIGN_PARAGRAPH.RIGHT)'
+          if old_story not in s:
+              raise SystemExit('Header/footer alignment normalizer was not found')
+          s=s.replace(old_story,new_story,1)
           old='''        if re.search(r"الفصل\\s+(?:الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر|الثاني عشر|الثالث عشر|الرابع عشر)",text): chapter_pages.append(i)'''
           new='''        page_lines=[clean(line) for line in text.splitlines() if clean(line)]\n        page_head=[line for line in page_lines[:8] if line != BOOK_TITLE and not re.fullmatch(r"[٠-٩0-9]+", line)]\n        if any(CHAPTER_RE.match(line) for line in page_head[:4]): chapter_pages.append(i)'''
           if old not in s:
