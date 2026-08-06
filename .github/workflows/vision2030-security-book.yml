@@ -119,11 +119,26 @@ jobs:
           if old_story not in s:
               raise SystemExit('Header/footer alignment normalizer was not found')
           s=s.replace(old_story,new_story,1)
+          chapter_fallback_target='''    reference_mode = False\n    author_bio_mode = False'''
+          chapter_fallback='''    if len(chapter_number_indices) < 14:\n        fallback_candidates=[i for i,t in enumerate(texts) if t.startswith("التأصيل المفاهيمي والشرعي") and not t.startswith("الفصل")]\n        if fallback_candidates:\n            chapter_title_indices.add(fallback_candidates[-1])\n    reference_mode = False\n    author_bio_mode = False'''
+          if chapter_fallback_target not in s:
+              raise SystemExit('Chapter fallback insertion point was not found')
+          s=s.replace(chapter_fallback_target,chapter_fallback,1)
+          old_odd='''    for p in list(doc.paragraphs):\n        if not CHAPTER_RE.match(clean(p.text)):\n            continue'''
+          new_odd='''    for p in list(doc.paragraphs):\n        text=clean(p.text)\n        fallback_title=bool(p.style and p.style.name == "Chapter Title" and text.startswith("التأصيل المفاهيمي والشرعي"))\n        if not (CHAPTER_RE.match(text) or fallback_title):\n            continue'''
+          if old_odd not in s:
+              raise SystemExit('Odd-page chapter selector was not found')
+          s=s.replace(old_odd,new_odd,1)
           old='''        if re.search(r"الفصل\\s+(?:الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر|الثاني عشر|الثالث عشر|الرابع عشر)",text): chapter_pages.append(i)'''
           new='''        page_lines=[clean(line) for line in text.splitlines() if clean(line)]\n        page_head=[line for line in page_lines[:8] if line != BOOK_TITLE and not re.fullmatch(r"[٠-٩0-9]+", line)]\n        if any(CHAPTER_RE.match(line) for line in page_head[:4]): chapter_pages.append(i)'''
           if old not in s:
               raise SystemExit('Chapter audit target was not found')
           s=s.replace(old,new,1)
+          old_count='''    chapter_count=sum(1 for p in doc.paragraphs if p.style and p.style.name=="Chapter Number" and CHAPTER_RE.match(clean(p.text)))'''
+          new_count='''    chapter_count=sum(1 for p in doc.paragraphs if p.style and p.style.name=="Chapter Title")'''
+          if old_count not in s:
+              raise SystemExit('Chapter count audit was not found')
+          s=s.replace(old_count,new_count,1)
           old_normalized='''    normalized = Document(FINAL_DOCX)\n    create_styles(normalized); ensure_settings(normalized)\n    for sec in normalized.sections:\n        set_geometry(sec)'''
           new_normalized='''    normalized = Document(FINAL_DOCX)\n    create_styles(normalized); ensure_settings(normalized)\n    for p in normalized.paragraphs:\n        if ar_ratio(clean(p.text)) > .25:\n            ppr=p._p.get_or_add_pPr()\n            if ppr.find(qn("w:bidi")) is None:\n                ppr.insert(0,OxmlElement("w:bidi"))\n    for sec in normalized.sections:\n        set_geometry(sec)'''
           if old_normalized not in s:
