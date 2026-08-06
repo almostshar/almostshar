@@ -1,0 +1,149 @@
+name: First book 28-step compliance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/first_book_28_step_compliance.py'
+      - '.github/workflows/first-book-28-step-compliance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      INTERIOR_URL: 'https://sdmntprseasia.oaiusercontent.com/files/00000000-3220-8207-b94e-f0e769a4cd77/raw?se=2026-08-05T07:44:26Z&sp=r&sv=2026-02-06&sr=b&scid=0ebe88d1-23a4-5d6d-a06c-a7b846b68d9c&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-05T01:51:12Z&ske=2026-08-06T01:51:12Z&sks=b&skv=2026-02-06&sig=E2wIy9s3W6b1JAlAVz762LF/UzaslhTle3gVJ7KCxT8%3D'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact interior source
+        run: |
+          curl --fail --location --retry 4 --retry-delay 1 "$INTERIOR_URL" -o source_interior.docx
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('source_interior.docx')
+          print(p.stat().st_size, p.read_bytes()[:16])
+          assert p.exists() and p.stat().st_size > 1000
+          assert p.read_bytes()[:2] == b'PK', 'Interior source is not a DOCX ZIP package'
+          PY
+
+      - name: Install Word, PDF and Arabic rendering dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-writer python3-uno poppler-utils fonts-noto-core fonts-hosny-amiri
+          python -m pip install --quiet python-docx lxml pymupdf pillow arabic-reshaper python-bidi
+          fc-cache -f
+          fc-match 'Amiri'
+          fc-match 'Amiri Quran'
+          fc-match 'Noto Kufi Arabic'
+
+      - name: Patch compliance script
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/first_book_28_step_compliance.py')
+          s = p.read_text(encoding='utf-8')
+
+          start = s.index('def build_readme(audit):')
+          end = s.index('\ndef package():', start)
+          lines = [
+              'def build_readme(audit):',
+              '    text = (',
+              '        "الحوكمة من الصفر — حزمة المراجعة الشاملة\\n\\n"',
+              '        f"عدد صفحات نسخة PDF للمراجعة: {audit[\'pdf_pages\']}\\n"',
+              '        "تحتوي الحزمة على:\\n"',
+              '        "- النسخة النهائية المطابقة لمعيار Word.\\n"',
+              '        "- PDF للمراجعة البصرية، وليس شهادة PDF/X-4.\\n"',
+              '        "- تقرير مطابقة الخطوات الثماني والعشرين Word وPDF.\\n"',
+              '        "- قالب الغلاف الأمامي Word وPNG بدقة 300 DPI.\\n"',
+              '        "- قالب الغلاف الخلفي والكعب Word وPNG.\\n"',
+              '        "- ملف التدقيق الآلي ولوحات مراجعة جميع الصفحات.\\n\\n"',
+              '        "البيانات الخارجية المتبقية: اسم المؤلف، السيرة، الناشر والشعار والموقع، ISBN والباركود وQR والتصنيف والسعر، ونوع الورق وسماكته وعرض الكعب واعتماد المطبعة.\\n"',
+              '    )',
+              '    README.write_text(text, encoding="utf-8")',
+              '',
+          ]
+          s = s[:start] + '\n'.join(lines) + s[end:]
+
+          needle = '        if is_box:\n            stats["boxes"] += 1\n'
+          addition = (
+              needle
+              + '            trpr = table.rows[0]._tr.get_or_add_trPr()\n'
+              + '            if trpr.find(qn("w:cantSplit")) is None:\n'
+              + '                trpr.append(OxmlElement("w:cantSplit"))\n'
+          )
+          if needle not in s:
+              raise SystemExit('Editorial-box block was not found')
+          s = s.replace(needle, addition, 1)
+
+          old_cover = '    p = doc.paragraphs[0]\n    p.alignment = WD_ALIGN_PARAGRAPH.CENTER\n'
+          new_cover = '    p = doc.paragraphs[0] if doc.paragraphs else doc.add_paragraph()\n    p.alignment = WD_ALIGN_PARAGRAPH.CENTER\n'
+          if old_cover not in s:
+              raise SystemExit('Cover paragraph constructor was not found')
+          s = s.replace(old_cover, new_cover, 1)
+
+          line1 = '        if group=="justified" and p.alignment not in (WD_ALIGN_PARAGRAPH.JUSTIFY,None): bad_align.append((i,name,"not_justified"))'
+          line2 = '        if group in ("right","right_heading") and p.alignment not in (WD_ALIGN_PARAGRAPH.RIGHT,None): bad_align.append((i,name,"not_right"))'
+          if line1 not in s or line2 not in s:
+              raise SystemExit('Alignment audit lines were not found')
+          replacement1 = (
+              '        jc = p._p.get_or_add_pPr().find(qn("w:jc"))\n'
+              '        align_token = jc.get(qn("w:val")) if jc is not None else None\n'
+              '        if group=="justified" and align_token not in ("both","distribute",None): bad_align.append((i,name,"not_justified",align_token))'
+          )
+          replacement2 = '        if group in ("right","right_heading") and align_token not in ("right","end",None): bad_align.append((i,name,"not_right",align_token))'
+          s = s.replace(line1, replacement1, 1)
+          s = s.replace(line2, replacement2, 1)
+
+          export_line = '    subprocess.run(["/usr/bin/python3", str(script)], check=True)\n'
+          export_patch = (
+              export_line
+              + '    normalized = Document(FINAL_DOCX)\n'
+              + '    for sec in normalized.sections:\n'
+              + '        set_geometry(sec)\n'
+              + '    normalized.save(FINAL_DOCX)\n'
+              + '    normalized_pdf = OUT / (FINAL_DOCX.stem + ".pdf")\n'
+              + '    if normalized_pdf.exists():\n'
+              + '        normalized_pdf.unlink()\n'
+              + '    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(OUT), str(FINAL_DOCX)], check=True)\n'
+              + '    if not normalized_pdf.exists():\n'
+              + '        raise RuntimeError("Corrected PDF export was not created")\n'
+              + '    if FINAL_PDF.exists():\n'
+              + '        FINAL_PDF.unlink()\n'
+              + '    normalized_pdf.replace(FINAL_PDF)\n'
+          )
+          if export_line not in s:
+              raise SystemExit('LibreOffice export completion line was not found')
+          s = s.replace(export_line, export_patch, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Syntax check
+        run: python -m py_compile scripts/first_book_28_step_compliance.py
+
+      - name: Correct, update, render, audit and package
+        run: |
+          python scripts/first_book_28_step_compliance.py
+          test -s 'output/الحوكمة_من_الصفر_النسخة_المطابقة_للمعيار.docx'
+          test -s 'output/الحوكمة_من_الصفر_نسخة_المراجعة.pdf'
+          test -s 'output/تقرير_مطابقة_الحوكمة_من_الصفر_للخطوات_28.pdf'
+          test -s 'الحوكمة_من_الصفر_حزمة_المراجعة_الشاملة.zip'
+          unzip -t 'الحوكمة_من_الصفر_حزمة_المراجعة_الشاملة.zip'
+
+      - name: Upload final reviewed package
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-book-28-step-compliance-final
+          path: |
+            الحوكمة_من_الصفر_حزمة_المراجعة_الشاملة.zip
+            output/الحوكمة_من_الصفر_النسخة_المطابقة_للمعيار.docx
+            output/الحوكمة_من_الصفر_نسخة_المراجعة.pdf
+            output/تقرير_مطابقة_الحوكمة_من_الصفر_للخطوات_28.docx
+            output/تقرير_مطابقة_الحوكمة_من_الصفر_للخطوات_28.pdf
+            output/audit_28_steps.json
+          retention-days: 2
+          if-no-files-found: error

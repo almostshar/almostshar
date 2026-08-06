@@ -1,0 +1,226 @@
+name: Vision 2030 security book production
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/vision2030_security_book.py'
+      - '.github/workflows/vision2030-security-book.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SHARE_TOKEN: 'IQBENqePffrST40tRTeoxUtIAXKyjSiui00os9poy72gXlY'
+      GUEST_URL: 'https://iacademyap-my.sharepoint.com/personal/iaa_iacademyap_com/_layouts/15/guestaccess.aspx?share=IQBENqePffrST40tRTeoxUtIAXKyjSiui00os9poy72gXlY'
+      DIRECT_URL: 'https://iacademyap-my.sharepoint.com/personal/iaa_iacademyap_com/_layouts/15/download.aspx?UniqueId=8FA73644-FA7D-4FD2-8D2D-4537A8C54B48'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve guest access and download exact manuscript
+        run: |
+          rm -f cookies.txt source_interior.docx guest.html candidate.docx
+          curl --fail --location --retry 3 --retry-delay 2 --user-agent 'Mozilla/5.0' --cookie-jar cookies.txt --cookie cookies.txt "$GUEST_URL" -o guest.html
+          set +e
+          curl --location --retry 3 --retry-delay 1 --user-agent 'Mozilla/5.0' --cookie-jar cookies.txt --cookie cookies.txt "$DIRECT_URL" -o candidate.docx
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('candidate.docx')
+          raise SystemExit(0 if p.exists() and p.stat().st_size>1000 and p.read_bytes()[:2]==b'PK' else 1)
+          PY
+          OK=$?
+          set -e
+          if [ "$OK" -eq 0 ]; then
+            mv candidate.docx source_interior.docx
+          else
+            python - <<'PY'
+          from pathlib import Path
+          import html, re
+          text=Path('guest.html').read_text(encoding='utf-8',errors='ignore')
+          patterns=[
+              r'["\'](?:\.downloadUrl|downloadUrl)["\']\s*:\s*["\']([^"\']+)',
+              r'\\?"(?:\\?\.downloadUrl|downloadUrl)\\?"\s*:\s*\\?"([^"\r\n]+)',
+              r'https?[^"\'<>\s]+(?:download\.aspx|downloadUrl|content)[^"\'<>\s]+',
+          ]
+          candidates=[]
+          for pat in patterns: candidates.extend(re.findall(pat,text,re.I))
+          cleaned=[]
+          for value in candidates:
+              if isinstance(value,tuple): value=value[0]
+              value=html.unescape(value)
+              for a,c in [('\\/','/'),('\\u002f','/'),('\\u002F','/'),('\\u003a',':'),('\\u003A',':'),('\\u0026','&'),('\\u003d','='),('\\u003D','=')]: value=value.replace(a,c)
+              value=value.replace('\\"','"')
+              if value.startswith('http') and value not in cleaned: cleaned.append(value)
+          print('guest_resolved_candidates',len(cleaned))
+          for i,url in enumerate(cleaned[:12]): print(i,url[:300])
+          Path('resolved_urls.txt').write_text('\n'.join(cleaned),encoding='utf-8')
+          PY
+            : > source_interior.docx
+            while IFS= read -r URL; do
+              rm -f candidate.docx
+              curl --location --retry 2 --retry-delay 1 --user-agent 'Mozilla/5.0' --cookie-jar cookies.txt --cookie cookies.txt "$URL" -o candidate.docx || true
+              if python - <<'PY'
+          from pathlib import Path
+          p=Path('candidate.docx')
+          raise SystemExit(0 if p.exists() and p.stat().st_size>1000 and p.read_bytes()[:2]==b'PK' else 1)
+          PY
+              then
+                mv candidate.docx source_interior.docx
+                break
+              fi
+            done < resolved_urls.txt
+          fi
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('source_interior.docx')
+          assert p.exists() and p.stat().st_size > 1000, 'Guest access did not return the manuscript'
+          assert p.read_bytes()[:2] == b'PK', f'Source is not a DOCX package: {p.read_bytes()[:100]!r}'
+          print('source_bytes',p.stat().st_size)
+          PY
+
+      - name: Install Arabic Word and PDF toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-writer python3-uno poppler-utils ghostscript fonts-noto-core fonts-hosny-amiri
+          python -m pip install --quiet python-docx lxml pymupdf pillow arabic-reshaper python-bidi
+          fc-cache -f
+          fc-match 'Amiri'
+          fc-match 'Amiri Quran'
+          fc-match 'Noto Kufi Arabic'
+
+      - name: Convert chapter two nested opening to standard Word headings
+        run: |
+          python - <<'PY'
+          from docx import Document
+          from pathlib import Path
+          from lxml.etree import QName
+          import re, unicodedata
+
+          path=Path('source_interior.docx')
+          doc=Document(path)
+          body=doc.element.body
+
+          def norm(value):
+              value=unicodedata.normalize('NFKD',value or '')
+              value=''.join(ch for ch in value if unicodedata.category(ch) not in ('Mn','Cf'))
+              value=value.replace('أ','ا').replace('إ','ا').replace('آ','ا').replace('ى','ي')
+              return re.sub(r'\s+',' ',value).strip()
+
+          children=list(body.iterchildren())
+          number_matches=[]
+          title_matches=[]
+          for index,child in enumerate(children):
+              text=' '.join(t.text or '' for t in child.xpath('.//*[local-name()="t"]'))
+              n=norm(text)
+              if 'الفصل الثاني' in n:
+                  number_matches.append((index,child,text))
+              if 'التاصيل المفاهيمي والشرعي' in n or 'والنظامي للامن' in n:
+                  title_matches.append((index,child,text))
+
+          print('chapter_two_number_matches',[(i,QName(c).localname,repr(t[:180])) for i,c,t in number_matches])
+          print('chapter_two_title_matches',[(i,QName(c).localname,repr(t[:180])) for i,c,t in title_matches])
+          if not number_matches or not title_matches:
+              raise SystemExit('Could not locate both structural components of the real chapter-two opening')
+
+          num_index,num_child,_=number_matches[-1]
+          near_titles=[item for item in title_matches if item[0] >= num_index-2]
+          title_index,title_child,_=(near_titles[-1] if near_titles else title_matches[-1])
+          targets=[]
+          for child in (num_child,title_child):
+              if child not in targets:
+                  targets.append(child)
+          first=min(targets,key=lambda c: children.index(c))
+
+          p_num=doc.add_paragraph('الفصل الثاني')
+          p_title=doc.add_paragraph('التأصيل المفاهيمي والشرعي والنظامي للأمن')
+          first.addprevious(p_num._p)
+          first.addprevious(p_title._p)
+          for child in targets:
+              parent=child.getparent()
+              if parent is not None:
+                  parent.remove(child)
+          doc.save(path)
+          print('chapter_two_nested_blocks_replaced',len(targets))
+          PY
+
+      - name: Make formatter standalone and patch strict audit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/vision2030_security_book.py')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('import first_book_28_step_compliance as b\n','from docx.text.paragraph import Paragraph\n',1)
+          s=s.replace('import re\n','import re\nimport unicodedata\n',1)
+          old_insert='''    new = b.Paragraph(new_p, p._parent) if hasattr(b, "Paragraph") else None\n    if new is None:\n        from docx.text.paragraph import Paragraph\n        new = Paragraph(new_p, p._parent)'''
+          if old_insert not in s:
+              raise SystemExit('Inherited Paragraph helper block was not found')
+          s=s.replace(old_insert,'    new = Paragraph(new_p, p._parent)',1)
+          old_clean='''def clean(s: str) -> str:\n    return re.sub(r"\\s+", " ", (s or "").replace("\\u200f", "").replace("\\u200e", "")).strip()'''
+          new_clean='''def clean(s: str) -> str:\n    raw=(s or "").replace("\\u200f", "").replace("\\u200e", "")\n    raw="".join(ch for ch in raw if unicodedata.category(ch) != "Cf")\n    return re.sub(r"\\s+", " ", raw).strip()'''
+          if old_clean not in s:
+              raise SystemExit('Text normalizer was not found')
+          s=s.replace(old_clean,new_clean,1)
+          old_drawing="return bool(p._p.xpath('.//w:drawing|.//w:pict|.//v:shape'))"
+          new_drawing="return bool(p._p.xpath('.//*[local-name()=\"drawing\" or local-name()=\"pict\" or local-name()=\"shape\"]'))"
+          if old_drawing not in s:
+              raise SystemExit('Drawing detector was not found')
+          s=s.replace(old_drawing,new_drawing,1)
+          old_story='                set_bidi_paragraph(p, p.alignment or WD_ALIGN_PARAGRAPH.RIGHT)'
+          new_story='                set_bidi_paragraph(p, WD_ALIGN_PARAGRAPH.RIGHT)'
+          if old_story not in s:
+              raise SystemExit('Header/footer alignment normalizer was not found')
+          s=s.replace(old_story,new_story,1)
+          old='''        if re.search(r"الفصل\\s+(?:الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر|الثاني عشر|الثالث عشر|الرابع عشر)",text): chapter_pages.append(i)'''
+          new='''        page_lines=[clean(line) for line in text.splitlines() if clean(line)]\n        page_head=[line for line in page_lines[:8] if line != BOOK_TITLE and not re.fullmatch(r"[٠-٩0-9]+", line)]\n        if any(CHAPTER_RE.match(line) for line in page_head[:4]): chapter_pages.append(i)'''
+          if old not in s:
+              raise SystemExit('Chapter audit target was not found')
+          s=s.replace(old,new,1)
+          old_normalized='''    normalized = Document(FINAL_DOCX)\n    create_styles(normalized); ensure_settings(normalized)\n    for sec in normalized.sections:\n        set_geometry(sec)'''
+          new_normalized='''    normalized = Document(FINAL_DOCX)\n    create_styles(normalized); ensure_settings(normalized)\n    for p in normalized.paragraphs:\n        if ar_ratio(clean(p.text)) > .25:\n            ppr=p._p.get_or_add_pPr()\n            if ppr.find(qn("w:bidi")) is None:\n                ppr.insert(0,OxmlElement("w:bidi"))\n    for sec in normalized.sections:\n        set_geometry(sec)'''
+          if old_normalized not in s:
+              raise SystemExit('Post-index normalization block was not found')
+          s=s.replace(old_normalized,new_normalized,1)
+          old_export='''    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(OUT), str(FINAL_DOCX)], check=True)'''
+          new_export='''    pdf_filter='pdf:writer_pdf_Export:{"IsSkipEmptyPages":{"type":"boolean","value":"false"},"UseTaggedPDF":{"type":"boolean","value":"true"}}'\n    subprocess.run(["soffice", "--headless", "--convert-to", pdf_filter, "--outdir", str(OUT), str(FINAL_DOCX)], check=True)'''
+          if old_export not in s:
+              raise SystemExit('PDF export command was not found')
+          s=s.replace(old_export,new_export,1)
+          old_track='''                if b"<w:ins" in data or b"<w:del" in data: tracked.append(name)'''
+          new_track='''                if re.search(rb'<w:(?:ins|del)(?:\\s|>)', data): tracked.append(name)'''
+          if old_track not in s:
+              raise SystemExit('Tracked-change detector was not found')
+          s=s.replace(old_track,new_track,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+
+      - name: Syntax check
+        run: |
+          python -m py_compile scripts/vision2030_security_book.py
+
+      - name: Format, update, render, audit and package
+        run: |
+          python scripts/vision2030_security_book.py
+          test -s 'output/رؤية_المملكة_2030_والأمن_الشامل_النسخة_النهائية.docx'
+          test -s 'output/رؤية_المملكة_2030_والأمن_الشامل_نسخة_الطباعة_الرمادية.pdf'
+          test -s 'output/تقرير_مطابقة_رؤية_المملكة_2030_والأمن_الشامل_للخطوات_28.pdf'
+          test -s 'رؤية_المملكة_2030_والأمن_الشامل_الحزمة_النهائية.zip'
+          unzip -t 'رؤية_المملكة_2030_والأمن_الشامل_الحزمة_النهائية.zip'
+
+      - name: Upload verified final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision2030-security-book-final
+          path: |
+            رؤية_المملكة_2030_والأمن_الشامل_الحزمة_النهائية.zip
+            output/رؤية_المملكة_2030_والأمن_الشامل_النسخة_النهائية.docx
+            output/رؤية_المملكة_2030_والأمن_الشامل_نسخة_الطباعة_الرمادية.pdf
+            output/رؤية_المملكة_2030_والأمن_الشامل_الغلاف_الأمامي.docx
+            output/رؤية_المملكة_2030_والأمن_الشامل_الغلاف_الخلفي.docx
+            output/تقرير_مطابقة_رؤية_المملكة_2030_والأمن_الشامل_للخطوات_28.pdf
+            output/audit_28_steps.json
+          retention-days: 2
+          if-no-files-found: error
