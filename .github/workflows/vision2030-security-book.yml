@@ -16,29 +16,59 @@ jobs:
     timeout-minutes: 60
     env:
       SOURCE_URL: 'https://iacademyap-my.sharepoint.com/:w:/p/iaa/IQBENqePffrST40tRTeoxUtIAXKyjSiui00os9poy72gXlY'
-      DIRECT_URL: 'https://iacademyap-my.sharepoint.com/personal/iaa_iacademyap_com/_layouts/15/download.aspx?UniqueId=8FA73644-FA7D-4FD2-8D2D-4537A8C54B48'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download exact manuscript
+      - name: Resolve and download exact manuscript
         run: |
-          set +e
-          curl --location --retry 3 --retry-delay 2 --user-agent 'Mozilla/5.0' "${SOURCE_URL}?download=1" -o source_interior.docx
+          curl --fail --location --retry 3 --retry-delay 2 --user-agent 'Mozilla/5.0' "$SOURCE_URL" -o sharepoint_viewer.html
           python - <<'PY'
           from pathlib import Path
-          p=Path('source_interior.docx')
-          raise SystemExit(0 if p.exists() and p.stat().st_size > 1000 and p.read_bytes()[:2] == b'PK' else 1)
+          import html, json, re
+          text=Path('sharepoint_viewer.html').read_text(encoding='utf-8',errors='ignore')
+          patterns=[
+              r'["\'](?:\.downloadUrl|downloadUrl)["\']\s*:\s*["\']([^"\']+)',
+              r'\\?"(?:\\?\.downloadUrl|downloadUrl)\\?"\s*:\s*\\?"([^"\r\n]+)',
+              r'https?[^"\'<>\s]+(?:download|content)[^"\'<>\s]+',
+          ]
+          candidates=[]
+          for pat in patterns:
+              candidates.extend(re.findall(pat,text,re.I))
+          cleaned=[]
+          for value in candidates:
+              if isinstance(value,tuple): value=value[0]
+              value=html.unescape(value)
+              value=value.replace('\\/','/').replace('\\u002f','/').replace('\\u002F','/').replace('\\u003a',':').replace('\\u003A',':').replace('\\u0026','&').replace('\\u003d','=').replace('\\u003D','=')
+              value=value.replace('\\"','"')
+              if value.startswith('http') and value not in cleaned:
+                  cleaned.append(value)
+          print('resolved_candidates',len(cleaned))
+          for i,url in enumerate(cleaned[:10]): print(i,url[:240])
+          if not cleaned:
+              for token in ('downloadUrl','DownloadUrl','@microsoft.graph.downloadUrl'):
+                  pos=text.find(token)
+                  if pos>=0: print('context',text[max(0,pos-300):pos+800])
+              raise SystemExit('No download URL found in SharePoint viewer HTML')
+          Path('resolved_urls.txt').write_text('\n'.join(cleaned),encoding='utf-8')
           PY
-          OK=$?
-          if [ "$OK" -ne 0 ]; then
-            rm -f source_interior.docx
-            curl --fail --location --retry 3 --retry-delay 2 --user-agent 'Mozilla/5.0' "$DIRECT_URL" -o source_interior.docx
-          fi
-          set -e
+          : > source_interior.docx
+          while IFS= read -r URL; do
+            rm -f candidate.docx
+            curl --location --retry 2 --retry-delay 1 --user-agent 'Mozilla/5.0' "$URL" -o candidate.docx || true
+            if python - <<'PY'
+          from pathlib import Path
+          p=Path('candidate.docx')
+          raise SystemExit(0 if p.exists() and p.stat().st_size>1000 and p.read_bytes()[:2]==b'PK' else 1)
+          PY
+            then
+              mv candidate.docx source_interior.docx
+              break
+            fi
+          done < resolved_urls.txt
           python - <<'PY'
           from pathlib import Path
           p=Path('source_interior.docx')
-          assert p.exists() and p.stat().st_size > 1000
+          assert p.exists() and p.stat().st_size > 1000, 'Resolved URLs did not return the manuscript'
           assert p.read_bytes()[:2] == b'PK', f'Source is not a DOCX package: {p.read_bytes()[:80]!r}'
           print('source_bytes',p.stat().st_size)
           PY
