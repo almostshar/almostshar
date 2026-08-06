@@ -1,0 +1,69 @@
+name: Vision 2030 security book production
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/vision2030_security_book.py'
+      - '.github/workflows/vision2030-security-book.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SOURCE_URL: 'https://sdmntpreastus2.oaiusercontent.com/files/00000000-dee0-81f6-b534-7c10b2ef0d93/raw?se=2026-08-06T09%3A36%3A41Z&sp=r&sv=2026-02-06&sr=b&scid=e88d8299-9295-516f-bfef-2afc65a3500d&skoid=dd316919-ffbf-4550-9c54-dfc99f412009&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-06T06%3A14%3A25Z&ske=2026-08-07T06%3A14%3A25Z&sks=b&skv=2026-02-06&sig=51EAPaKkgoeRnzCymCJw8br7absUWTSZhwrkZUgdbhA%3D'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact manuscript
+        run: |
+          curl --fail --location --retry 4 --retry-delay 2 --user-agent 'Mozilla/5.0' "$SOURCE_URL" -o source_interior.docx
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('source_interior.docx')
+          assert p.exists() and p.stat().st_size > 1000
+          assert p.read_bytes()[:2] == b'PK', 'Source is not a DOCX package'
+          print('source_bytes',p.stat().st_size)
+          PY
+
+      - name: Install Arabic Word and PDF toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-writer python3-uno poppler-utils ghostscript fonts-noto-core fonts-hosny-amiri
+          python -m pip install --quiet python-docx lxml pymupdf pillow arabic-reshaper python-bidi
+          fc-cache -f
+          fc-match 'Amiri'
+          fc-match 'Amiri Quran'
+          fc-match 'Noto Kufi Arabic'
+
+      - name: Syntax check
+        run: |
+          python -m py_compile scripts/vision2030_security_book.py
+
+      - name: Format, update, render, audit and package
+        run: |
+          python scripts/vision2030_security_book.py
+          test -s 'output/رؤية_المملكة_2030_والأمن_الشامل_النسخة_النهائية.docx'
+          test -s 'output/رؤية_المملكة_2030_والأمن_الشامل_نسخة_الطباعة_الرمادية.pdf'
+          test -s 'output/تقرير_مطابقة_رؤية_المملكة_2030_والأمن_الشامل_للخطوات_28.pdf'
+          test -s 'رؤية_المملكة_2030_والأمن_الشامل_الحزمة_النهائية.zip'
+          unzip -t 'رؤية_المملكة_2030_والأمن_الشامل_الحزمة_النهائية.zip'
+
+      - name: Upload verified final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision2030-security-book-final
+          path: |
+            رؤية_المملكة_2030_والأمن_الشامل_الحزمة_النهائية.zip
+            output/رؤية_المملكة_2030_والأمن_الشامل_النسخة_النهائية.docx
+            output/رؤية_المملكة_2030_والأمن_الشامل_نسخة_الطباعة_الرمادية.pdf
+            output/رؤية_المملكة_2030_والأمن_الشامل_الغلاف_الأمامي.docx
+            output/رؤية_المملكة_2030_والأمن_الشامل_الغلاف_الخلفي.docx
+            output/تقرير_مطابقة_رؤية_المملكة_2030_والأمن_الشامل_للخطوات_28.pdf
+            output/audit_28_steps.json
+          retention-days: 2
+          if-no-files-found: error
