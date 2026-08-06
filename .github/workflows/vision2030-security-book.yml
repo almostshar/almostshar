@@ -92,11 +92,12 @@ jobs:
           fc-match 'Amiri Quran'
           fc-match 'Noto Kufi Arabic'
 
-      - name: Convert chapter two text boxes to standard Word headings
+      - name: Convert chapter two nested opening to standard Word headings
         run: |
           python - <<'PY'
           from docx import Document
           from pathlib import Path
+          from lxml.etree import QName
           import re, unicodedata
 
           path=Path('source_interior.docx')
@@ -109,24 +110,31 @@ jobs:
               value=value.replace('أ','ا').replace('إ','ا').replace('آ','ا').replace('ى','ي')
               return re.sub(r'\s+',' ',value).strip()
 
-          targets=[]
-          for child in list(body.iterchildren()):
-              if not child.xpath('.//*[local-name()="txbxContent"]'):
-                  continue
+          children=list(body.iterchildren())
+          number_matches=[]
+          title_matches=[]
+          for index,child in enumerate(children):
               text=' '.join(t.text or '' for t in child.xpath('.//*[local-name()="t"]'))
               n=norm(text)
-              if 'الفصل الثاني' in n or 'التاصيل المفاهيمي والشرعي' in n or 'والنظامي للامن' in n:
+              if 'الفصل الثاني' in n:
+                  number_matches.append((index,child,text))
+              if 'التاصيل المفاهيمي والشرعي' in n or 'والنظامي للامن' in n:
+                  title_matches.append((index,child,text))
+
+          print('chapter_two_number_matches',[(i,QName(c).localname,repr(t[:180])) for i,c,t in number_matches])
+          print('chapter_two_title_matches',[(i,QName(c).localname,repr(t[:180])) for i,c,t in title_matches])
+          if not number_matches or not title_matches:
+              raise SystemExit('Could not locate both structural components of the real chapter-two opening')
+
+          num_index,num_child,_=number_matches[-1]
+          near_titles=[item for item in title_matches if item[0] >= num_index-2]
+          title_index,title_child,_=(near_titles[-1] if near_titles else title_matches[-1])
+          targets=[]
+          for child in (num_child,title_child):
+              if child not in targets:
                   targets.append(child)
+          first=min(targets,key=lambda c: children.index(c))
 
-          if not targets:
-              diagnostic=[]
-              for child in list(body.iterchildren()):
-                  if child.xpath('.//*[local-name()="txbxContent"]'):
-                      text=' '.join(t.text or '' for t in child.xpath('.//*[local-name()="t"]'))
-                      if text.strip(): diagnostic.append(repr(text[:250]))
-              raise SystemExit('Chapter two text boxes were not found. Text-box samples: '+str(diagnostic[:30]))
-
-          first=targets[0]
           p_num=doc.add_paragraph('الفصل الثاني')
           p_title=doc.add_paragraph('التأصيل المفاهيمي والشرعي والنظامي للأمن')
           first.addprevious(p_num._p)
@@ -136,7 +144,7 @@ jobs:
               if parent is not None:
                   parent.remove(child)
           doc.save(path)
-          print('chapter_two_textbox_blocks_replaced',len(targets))
+          print('chapter_two_nested_blocks_replaced',len(targets))
           PY
 
       - name: Make formatter standalone and patch strict audit
