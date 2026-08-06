@@ -92,12 +92,17 @@ jobs:
           fc-match 'Amiri Quran'
           fc-match 'Noto Kufi Arabic'
 
-      - name: Patch strict chapter-opening audit
+      - name: Make formatter standalone and patch strict audit
         run: |
           python - <<'PY'
           from pathlib import Path
           p=Path('scripts/vision2030_security_book.py')
           s=p.read_text(encoding='utf-8')
+          s=s.replace('import first_book_28_step_compliance as b\n','from docx.text.paragraph import Paragraph\n',1)
+          old_insert='''    new = b.Paragraph(new_p, p._parent) if hasattr(b, "Paragraph") else None\n    if new is None:\n        from docx.text.paragraph import Paragraph\n        new = Paragraph(new_p, p._parent)'''
+          if old_insert not in s:
+              raise SystemExit('Inherited Paragraph helper block was not found')
+          s=s.replace(old_insert,'    new = Paragraph(new_p, p._parent)',1)
           old='''        if re.search(r"الفصل\\s+(?:الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر|الثاني عشر|الثالث عشر|الرابع عشر)",text): chapter_pages.append(i)'''
           new='''        page_lines=[clean(line) for line in text.splitlines() if clean(line)]\n        page_head=[line for line in page_lines[:8] if line != BOOK_TITLE and not re.fullmatch(r"[٠-٩0-9]+", line)]\n        if any(CHAPTER_RE.match(line) for line in page_head[:4]): chapter_pages.append(i)'''
           if old not in s:
