@@ -99,10 +99,16 @@ jobs:
           p=Path('scripts/vision2030_security_book.py')
           s=p.read_text(encoding='utf-8')
           s=s.replace('import first_book_28_step_compliance as b\n','from docx.text.paragraph import Paragraph\n',1)
+          s=s.replace('import re\n','import re\nimport unicodedata\n',1)
           old_insert='''    new = b.Paragraph(new_p, p._parent) if hasattr(b, "Paragraph") else None\n    if new is None:\n        from docx.text.paragraph import Paragraph\n        new = Paragraph(new_p, p._parent)'''
           if old_insert not in s:
               raise SystemExit('Inherited Paragraph helper block was not found')
           s=s.replace(old_insert,'    new = Paragraph(new_p, p._parent)',1)
+          old_clean='''def clean(s: str) -> str:\n    return re.sub(r"\\s+", " ", (s or "").replace("\\u200f", "").replace("\\u200e", "")).strip()'''
+          new_clean='''def clean(s: str) -> str:\n    raw=(s or "").replace("\\u200f", "").replace("\\u200e", "")\n    raw="".join(ch for ch in raw if unicodedata.category(ch) != "Cf")\n    return re.sub(r"\\s+", " ", raw).strip()'''
+          if old_clean not in s:
+              raise SystemExit('Text normalizer was not found')
+          s=s.replace(old_clean,new_clean,1)
           old_drawing="return bool(p._p.xpath('.//w:drawing|.//w:pict|.//v:shape'))"
           new_drawing="return bool(p._p.xpath('.//*[local-name()=\"drawing\" or local-name()=\"pict\" or local-name()=\"shape\"]'))"
           if old_drawing not in s:
@@ -118,6 +124,21 @@ jobs:
           if old not in s:
               raise SystemExit('Chapter audit target was not found')
           s=s.replace(old,new,1)
+          old_normalized='''    normalized = Document(FINAL_DOCX)\n    create_styles(normalized); ensure_settings(normalized)\n    for sec in normalized.sections:\n        set_geometry(sec)'''
+          new_normalized='''    normalized = Document(FINAL_DOCX)\n    create_styles(normalized); ensure_settings(normalized)\n    for p in normalized.paragraphs:\n        if ar_ratio(clean(p.text)) > .25:\n            ppr=p._p.get_or_add_pPr()\n            if ppr.find(qn("w:bidi")) is None:\n                ppr.insert(0,OxmlElement("w:bidi"))\n    for sec in normalized.sections:\n        set_geometry(sec)'''
+          if old_normalized not in s:
+              raise SystemExit('Post-index normalization block was not found')
+          s=s.replace(old_normalized,new_normalized,1)
+          old_export='''    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(OUT), str(FINAL_DOCX)], check=True)'''
+          new_export='''    pdf_filter='pdf:writer_pdf_Export:{"IsSkipEmptyPages":{"type":"boolean","value":"false"},"UseTaggedPDF":{"type":"boolean","value":"true"}}'\n    subprocess.run(["soffice", "--headless", "--convert-to", pdf_filter, "--outdir", str(OUT), str(FINAL_DOCX)], check=True)'''
+          if old_export not in s:
+              raise SystemExit('PDF export command was not found')
+          s=s.replace(old_export,new_export,1)
+          old_track='''                if b"<w:ins" in data or b"<w:del" in data: tracked.append(name)'''
+          new_track='''                if re.search(rb'<w:(?:ins|del)(?:\\s|>)', data): tracked.append(name)'''
+          if old_track not in s:
+              raise SystemExit('Tracked-change detector was not found')
+          s=s.replace(old_track,new_track,1)
           p.write_text(s,encoding='utf-8')
           PY
 
